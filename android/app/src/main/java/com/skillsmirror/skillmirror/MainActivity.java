@@ -1,4 +1,4 @@
-package com.skillmirror.skill_mirror;
+package com.skillsmirror.skillmirror;
 
 import io.flutter.embedding.android.FlutterActivity;
 

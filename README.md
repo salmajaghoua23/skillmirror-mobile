@@ -128,7 +128,7 @@ skillmirror/
 ```bash
 # 1. Cloner le dépôt
 git clone https://github.com/OWNER/skillmirror.git
-cd skillmirror
+cd skillsmirror
 
 # 2. Configuration
 cp .env.example .env        # puis adapter les valeurs
