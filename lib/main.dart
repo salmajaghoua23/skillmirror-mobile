@@ -1,12 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await Supabase.initialize(
+    url: 'https://bvqpuqdszrhnfwmxvsul.supabase.co',
+    publishableKey: 'sb_publishable_YGYpgEjKqMI1x1UHKqCYOg_q07eeJLd',
+
+    // Utiliser le jeton de l'utilisateur Firebase
+    accessToken: () async {
+      final user = FirebaseAuth.instance.currentUser;
+
+      if (user == null) {
+        return null;
+      }
+
+      return await user.getIdToken();
+    },
+  );
   runApp(const MyApp());
 }
 
