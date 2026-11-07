@@ -7,31 +7,25 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:1024745338586:android:d8860b81d39f22e43997e3",
-        "android_client_info": {
-          "package_name": "com.skillmirror.skill_mirror"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyBKzCyVV5Y6U1dhcjIVKrOnWp3VPnVLiUs"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
         "mobilesdk_app_id": "1:1024745338586:android:b8c00298ca9a22563997e3",
         "android_client_info": {
           "package_name": "com.skillsmirror.skillmirror"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "1024745338586-lp1tn9o0jsbt4lhvas6uav82u9add64o.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.skillsmirror.skillmirror",
+            "certificate_hash": "fb62b889650b4bc4a1fb1e1e7187cdd93d057af5"
+          }
+        },
+        {
+          "client_id": "1024745338586-7cnro091n7f4fbpn58rpo5el5kfufimf.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBKzCyVV5Y6U1dhcjIVKrOnWp3VPnVLiUs"
@@ -39,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1024745338586-7cnro091n7f4fbpn58rpo5el5kfufimf.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "1024745338586-4p1sqbla5i1fqe1obb4gnngnl9h1qa0u.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.skillmirror.skillMirror"
+              }
+            }
+          ]
         }
       }
     }
