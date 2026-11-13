@@ -27,7 +27,8 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   /// Inscription : Google + création du compte avec le rôle choisi.
@@ -41,7 +42,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
         if (!mounted) return;
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const AuthGate()),
-              (_) => false,
+          (_) => false,
         );
         return;
       }
@@ -128,7 +129,10 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                   padding: EdgeInsets.only(bottom: 12),
                   child: LinearProgressIndicator(),
                 ),
-              PrimaryButton(label: 'Continuer avec Google', onPressed: _onContinue),
+              PrimaryButton(
+                label: 'Continuer avec Google',
+                onPressed: _onContinue,
+              ),
               const SizedBox(height: 14),
               Center(
                 child: GestureDetector(

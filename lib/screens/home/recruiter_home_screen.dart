@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../services/auth_service.dart';
 
 class RecruiterHomeScreen extends StatelessWidget {
@@ -11,8 +12,9 @@ class RecruiterHomeScreen extends StatelessWidget {
         title: const Text('SkillMirror – Recruteur'),
         actions: [
           IconButton(
-              icon: const Icon(Icons.logout),
-              onPressed: () => AuthService().signOut()),
+            icon: const Icon(Icons.logout),
+            onPressed: () => AuthService().signOut(),
+          ),
         ],
       ),
       body: const Center(child: Text('Bienvenue, Recruteur!')),

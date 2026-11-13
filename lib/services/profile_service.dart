@@ -7,15 +7,14 @@ class ProfileService {
 
   /// Rôle choisi sur l'écran d'accueil, avant la connexion Google.
   static String? pendingRole;
+  Future<void> _refreshToken() => _user.getIdToken(true);
 
-  Future<Map<String, dynamic>?> getAccount() => _db
-      .from('profiles')
-      .select()
-      .eq('firebase_uid', _user.uid)
-      .maybeSingle();
+  Future<Map<String, dynamic>?> getAccount() =>
+      _db.from('profiles').select().eq('firebase_uid', _user.uid).maybeSingle();
 
   /// Retourne le compte ; le crée d'abord si un rôle est en attente.
   Future<Map<String, dynamic>?> getAccountOrCreate() async {
+    await _refreshToken();
     var account = await getAccount();
     if (account == null && pendingRole != null) {
       await createAccount(pendingRole!);
@@ -29,6 +28,7 @@ class ProfileService {
 
   /// role = 'candidate' ou 'recruiter'. Ne modifie pas un compte existant.
   Future<void> createAccount(String role) async {
+    await _refreshToken();
     if (await getAccount() != null) return;
     await _db.from('profiles').insert({
       'firebase_uid': _user.uid,
@@ -38,8 +38,10 @@ class ProfileService {
     });
   }
 
-  Future<void> saveCandidate(Map<String, dynamic> data,
-      {required String fullName}) async {
+  Future<void> saveCandidate(
+    Map<String, dynamic> data, {
+    required String fullName,
+  }) async {
     final id = await profileId();
     await _db.from('candidate_profiles').upsert({
       ...data,
@@ -48,11 +50,14 @@ class ProfileService {
     }, onConflict: 'profile_id');
     await _db
         .from('profiles')
-        .update({'full_name': fullName, 'onboarding_done': true}).eq('id', id);
+        .update({'full_name': fullName, 'onboarding_done': true})
+        .eq('id', id);
   }
 
-  Future<void> saveRecruiter(Map<String, dynamic> data,
-      {required String fullName}) async {
+  Future<void> saveRecruiter(
+    Map<String, dynamic> data, {
+    required String fullName,
+  }) async {
     final id = await profileId();
     await _db.from('recruiter_profiles').upsert({
       ...data,
@@ -61,6 +66,7 @@ class ProfileService {
     }, onConflict: 'profile_id');
     await _db
         .from('profiles')
-        .update({'full_name': fullName, 'onboarding_done': true}).eq('id', id);
+        .update({'full_name': fullName, 'onboarding_done': true})
+        .eq('id', id);
   }
 }

@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
 import '../services/auth_service.dart';
 import '../services/profile_service.dart';
 import 'home/candidate_home_screen.dart';
@@ -34,8 +35,9 @@ class AuthGate extends StatelessWidget {
                         Text('Erreur : ${acc.error}'),
                         const SizedBox(height: 16),
                         ElevatedButton(
-                            onPressed: () => AuthService().signOut(),
-                            child: const Text('Se déconnecter')),
+                          onPressed: () => AuthService().signOut(),
+                          child: const Text('Se déconnecter'),
+                        ),
                       ],
                     ),
                   ),
