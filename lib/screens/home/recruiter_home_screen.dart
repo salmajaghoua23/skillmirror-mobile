@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/auth_service.dart';
+import '../recruiter/recruiter_profile_screen.dart';
 
 class RecruiterHomeScreen extends StatelessWidget {
   const RecruiterHomeScreen({super.key});
@@ -15,7 +16,20 @@ class RecruiterHomeScreen extends StatelessWidget {
               onPressed: () => AuthService().signOut()),
         ],
       ),
-      body: const Center(child: Text('Bienvenue, Recruteur!')),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text('Bienvenue, Recruteur!'),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const RecruiterProfileScreen())),
+              child: const Text('Mon profil'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "1024745338586-bmsc74k7jpcn6v5t9ijeukb448c6a1ep.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.skillsmirror.skillmirror",
+            "certificate_hash": "b5e14e35403531ecbd4af361cea6587a842b1261"
+          }
+        },
+        {
           "client_id": "1024745338586-lp1tn9o0jsbt4lhvas6uav82u9add64o.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {

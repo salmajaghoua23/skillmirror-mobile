@@ -38,7 +38,8 @@ dependencies:
   firebase_auth: ^7.0.1
   supabase_flutter: ^2.18.3
   google_sign_in: 6.2.1
-  file_picker: ^8.1.2
+  file_picker: 10.3.6
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:

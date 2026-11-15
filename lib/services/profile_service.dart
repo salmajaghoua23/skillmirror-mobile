@@ -50,17 +50,4 @@ class ProfileService {
         .from('profiles')
         .update({'full_name': fullName, 'onboarding_done': true}).eq('id', id);
   }
-
-  Future<void> saveRecruiter(Map<String, dynamic> data,
-      {required String fullName}) async {
-    final id = await profileId();
-    await _db.from('recruiter_profiles').upsert({
-      ...data,
-      'profile_id': id,
-      'updated_at': DateTime.now().toIso8601String(),
-    }, onConflict: 'profile_id');
-    await _db
-        .from('profiles')
-        .update({'full_name': fullName, 'onboarding_done': true}).eq('id', id);
-  }
 }
