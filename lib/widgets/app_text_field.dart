@@ -30,8 +30,9 @@ class AppTextField extends StatelessWidget {
           labelText: required ? '$label *' : label,
           border: const OutlineInputBorder(),
         ),
-        validator: validator ??
-                (v) => required && (v == null || v.trim().isEmpty)
+        validator:
+            validator ??
+            (v) => required && (v == null || v.trim().isEmpty)
                 ? 'Champ obligatoire'
                 : null,
       ),

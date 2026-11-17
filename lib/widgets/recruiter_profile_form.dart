@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
 import '../models/recruiter_profile.dart';
 import '../services/recruiter_service.dart';
 import 'app_dropdown.dart';
@@ -53,7 +54,8 @@ class _RecruiterProfileFormState extends State<RecruiterProfileForm> {
   void initState() {
     super.initState();
     final p = widget.initial;
-    _fullName.text = p?.fullName ?? FirebaseAuth.instance.currentUser?.displayName ?? '';
+    _fullName.text =
+        p?.fullName ?? FirebaseAuth.instance.currentUser?.displayName ?? '';
     if (p != null) {
       _position.text = p.position;
       _company.text = p.companyName;
@@ -105,16 +107,25 @@ class _RecruiterProfileFormState extends State<RecruiterProfileForm> {
   String? _validateWebsite(String? v) {
     final w = (v ?? '').trim();
     if (w.isEmpty) return null;
-    final ok = RegExp(r'^(https?://)?([\w-]+\.)+[\w-]{2,}(/\S*)?$',
-        caseSensitive: false)
-        .hasMatch(w);
+    final ok = RegExp(
+      r'^(https?://)?([\w-]+\.)+[\w-]{2,}(/\S*)?$',
+      caseSensitive: false,
+    ).hasMatch(w);
     return ok ? null : 'Site web invalide (ex : monentreprise.com)';
   }
 
   @override
   void dispose() {
-    for (final c in [_fullName, _position, _company, _website, _country,
-      _city, _description, _hiringNeeds]) {
+    for (final c in [
+      _fullName,
+      _position,
+      _company,
+      _website,
+      _country,
+      _city,
+      _description,
+      _hiringNeeds,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -123,8 +134,11 @@ class _RecruiterProfileFormState extends State<RecruiterProfileForm> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     if (_domainIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Choisissez au moins un domaine de recrutement')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Choisissez au moins un domaine de recrutement'),
+        ),
+      );
       return;
     }
     setState(() => _saving = true);
@@ -156,91 +170,113 @@ class _RecruiterProfileFormState extends State<RecruiterProfileForm> {
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_loadError != null) {
-      return Center(child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('Chargement impossible :\n$_loadError',
-              textAlign: TextAlign.center),
-          const SizedBox(height: 12),
-          ElevatedButton(
-              onPressed: _loadReferences, child: const Text('Réessayer')),
-        ]),
-      ));
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Chargement impossible :\n$_loadError',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: _loadReferences,
+                child: const Text('Réessayer'),
+              ),
+            ],
+          ),
+        ),
+      );
     }
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Form(
         key: _formKey,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Vous', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 12),
-          AppTextField(controller: _fullName, label: 'Nom complet'),
-          AppTextField(controller: _position, label: 'Poste occupé'),
-          const SizedBox(height: 8),
-          Text('Votre entreprise', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 12),
-          AppTextField(controller: _company, label: "Nom de l'entreprise"),
-          AppDropdown(
-            label: "Secteur d'activité",
-            value: _sectorId,
-            items: {for (final s in _sectors) s.id: s.name},
-            onChanged: (v) => setState(() => _sectorId = v),
-          ),
-          AppDropdown(
-            label: "Taille de l'entreprise",
-            value: _size,
-            items: _sizes,
-            onChanged: (v) => setState(() => _size = v),
-          ),
-          AppTextField(
-            controller: _website,
-            label: 'Site web',
-            required: false,
-            keyboardType: TextInputType.url,
-            validator: _validateWebsite,
-          ),
-          AppTextField(controller: _country, label: 'Pays'),
-          AppTextField(controller: _city, label: 'Ville'),
-          AppTextField(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Vous', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            AppTextField(controller: _fullName, label: 'Nom complet'),
+            AppTextField(controller: _position, label: 'Poste occupé'),
+            const SizedBox(height: 8),
+            Text(
+              'Votre entreprise',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 12),
+            AppTextField(controller: _company, label: "Nom de l'entreprise"),
+            AppDropdown(
+              label: "Secteur d'activité",
+              value: _sectorId,
+              items: {for (final s in _sectors) s.id: s.name},
+              onChanged: (v) => setState(() => _sectorId = v),
+            ),
+            AppDropdown(
+              label: "Taille de l'entreprise",
+              value: _size,
+              items: _sizes,
+              onChanged: (v) => setState(() => _size = v),
+            ),
+            AppTextField(
+              controller: _website,
+              label: 'Site web',
+              required: false,
+              keyboardType: TextInputType.url,
+              validator: _validateWebsite,
+            ),
+            AppTextField(controller: _country, label: 'Pays'),
+            AppTextField(controller: _city, label: 'Ville'),
+            AppTextField(
               controller: _description,
               label: "Description de l'entreprise",
-              maxLines: 4),
-          const SizedBox(height: 8),
-          Text('Domaines de recrutement *',
-              style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: _domains.map((d) {
-              final selected = _domainIds.contains(d.id);
-              return FilterChip(
-                label: Text(d.name),
-                selected: selected,
-                onSelected: (v) => setState(
-                        () => v ? _domainIds.add(d.id) : _domainIds.remove(d.id)),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 14),
-          AppTextField(
+              maxLines: 4,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Domaines de recrutement *',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: _domains.map((d) {
+                final selected = _domainIds.contains(d.id);
+                return FilterChip(
+                  label: Text(d.name),
+                  selected: selected,
+                  onSelected: (v) => setState(
+                    () => v ? _domainIds.add(d.id) : _domainIds.remove(d.id),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 14),
+            AppTextField(
               controller: _hiringNeeds,
               label: 'Profils / compétences recherchés',
               required: false,
-              maxLines: 3),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _saving ? null : _submit,
-              child: _saving
-                  ? const SizedBox(
-                  height: 20, width: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text(widget.submitLabel),
+              maxLines: 3,
             ),
-          ),
-        ]),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _saving ? null : _submit,
+                child: _saving
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(widget.submitLabel),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

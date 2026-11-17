@@ -6,7 +6,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.jwt.Jwt;
 import java.util.Map;
 
 @RestController
@@ -25,7 +26,8 @@ public class MeController {
     /** Protégé : renvoie le compte lié au token Firebase. */
     @GetMapping("/me")
     public ResponseEntity<MeResponse> me(Authentication auth) {
-        String uid = (String) auth.getPrincipal();
+        Jwt jwt = (Jwt) auth.getPrincipal();
+        String uid = jwt.getSubject();
         return profiles.findByFirebaseUid(uid)
                 .map(p -> ResponseEntity.ok(new MeResponse(
                         p.getId(), p.getFullName(), p.getEmail(), p.getRole(),

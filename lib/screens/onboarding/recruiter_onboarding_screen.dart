@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../services/auth_service.dart';
 import '../../services/recruiter_service.dart';
 import '../../widgets/recruiter_profile_form.dart';
@@ -27,7 +28,7 @@ class RecruiterOnboardingScreen extends StatelessWidget {
           if (!context.mounted) return;
           Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (_) => const AuthGate()),
-                (_) => false,
+            (_) => false,
           );
         },
       ),

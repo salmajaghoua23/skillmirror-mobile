@@ -8,11 +8,8 @@ class ProfileService {
   /// Rôle choisi sur l'écran d'accueil, avant la connexion Google.
   static String? pendingRole;
 
-  Future<Map<String, dynamic>?> getAccount() => _db
-      .from('profiles')
-      .select()
-      .eq('firebase_uid', _user.uid)
-      .maybeSingle();
+  Future<Map<String, dynamic>?> getAccount() =>
+      _db.from('profiles').select().eq('firebase_uid', _user.uid).maybeSingle();
 
   /// Retourne le compte ; le crée d'abord si un rôle est en attente.
   Future<Map<String, dynamic>?> getAccountOrCreate() async {
@@ -38,8 +35,10 @@ class ProfileService {
     });
   }
 
-  Future<void> saveCandidate(Map<String, dynamic> data,
-      {required String fullName}) async {
+  Future<void> saveCandidate(
+    Map<String, dynamic> data, {
+    required String fullName,
+  }) async {
     final id = await profileId();
     await _db.from('candidate_profiles').upsert({
       ...data,
@@ -48,6 +47,7 @@ class ProfileService {
     }, onConflict: 'profile_id');
     await _db
         .from('profiles')
-        .update({'full_name': fullName, 'onboarding_done': true}).eq('id', id);
+        .update({'full_name': fullName, 'onboarding_done': true})
+        .eq('id', id);
   }
 }

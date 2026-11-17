@@ -12,9 +12,11 @@ class RecruiterService {
 
   Future<List<RefItem>> sectors() async =>
       (await _api.get('/reference/sectors') as List)
-          .map((e) => RefItem.fromJson(e)).toList();
+          .map((e) => RefItem.fromJson(e))
+          .toList();
 
   Future<List<RefItem>> domains() async =>
       (await _api.get('/reference/recruitment-domains') as List)
-          .map((e) => RefItem.fromJson(e)).toList();
+          .map((e) => RefItem.fromJson(e))
+          .toList();
 }

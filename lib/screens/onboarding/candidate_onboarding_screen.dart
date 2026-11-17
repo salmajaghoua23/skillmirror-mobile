@@ -1,8 +1,11 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
+import '../../models/candidate_profile.dart';
 import '../../services/auth_service.dart';
 import '../../services/cv_service.dart';
 import '../../services/profile_service.dart';
+import '../../services/candidate_service.dart';
 import '../../widgets/app_dropdown.dart';
 import '../../widgets/app_text_field.dart';
 import '../auth_gate.dart';
@@ -18,6 +21,7 @@ class CandidateOnboardingScreen extends StatefulWidget {
 class _CandidateOnboardingScreenState extends State<CandidateOnboardingScreen> {
   final _pageController = PageController();
   final _formKeys = List.generate(3, (_) => GlobalKey<FormState>());
+
   int _step = 0;
   bool _saving = false;
   bool _uploading = false;
@@ -50,6 +54,7 @@ class _CandidateOnboardingScreenState extends State<CandidateOnboardingScreen> {
     'F': 'Femme',
     'NOT_SPECIFIED': 'Je préfère ne pas préciser',
   };
+
   static const _levels = {
     'bac': 'Bac',
     'bac+2': 'Bac +2',
@@ -58,47 +63,65 @@ class _CandidateOnboardingScreenState extends State<CandidateOnboardingScreen> {
     'doctorat': 'Doctorat',
     'autre': 'Autre',
   };
+
   static const _availabilities = {
     'immediate': 'Immédiate',
     '1_month': 'Dans 1 mois',
     '3_months': 'Dans 3 mois',
     'internship': 'Stage uniquement',
   };
-  static const _languages = {
-    'fr': 'Français',
-    'en': 'Anglais',
-    'ar': 'Arabe',
-  };
+
+  static const _languages = {'fr': 'Français', 'en': 'Anglais', 'ar': 'Arabe'};
 
   @override
   void initState() {
     super.initState();
+
     final name = FirebaseAuth.instance.currentUser?.displayName ?? '';
+
     final parts = name.trim().split(' ');
+
     if (parts.isNotEmpty) _firstName.text = parts.first;
-    if (parts.length > 1) _lastName.text = parts.sublist(1).join(' ');
+    if (parts.length > 1) {
+      _lastName.text = parts.sublist(1).join(' ');
+    }
   }
 
   @override
   void dispose() {
     for (final c in [
-      _firstName, _lastName, _age, _country, _region, _sector, _studyField,
-      _diploma, _interests, _targetOffer, _trainingObjective,
+      _firstName,
+      _lastName,
+      _age,
+      _country,
+      _region,
+      _sector,
+      _studyField,
+      _diploma,
+      _interests,
+      _targetOffer,
+      _trainingObjective,
     ]) {
       c.dispose();
     }
+
     _pageController.dispose();
     super.dispose();
   }
 
   void _goTo(int step) {
     setState(() => _step = step);
-    _pageController.animateToPage(step,
-        duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+
+    _pageController.animateToPage(
+      step,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
   }
 
   void _next() {
     if (!_formKeys[_step].currentState!.validate()) return;
+
     if (_step < 2) {
       _goTo(_step + 1);
     } else {
@@ -108,72 +131,93 @@ class _CandidateOnboardingScreenState extends State<CandidateOnboardingScreen> {
 
   Future<void> _pickCv() async {
     setState(() => _uploading = true);
+
     try {
       final cv = await CvService().pickAndUpload();
-      if (cv != null) setState(() => _cv = cv);
+
+      if (cv != null && mounted) {
+        setState(() => _cv = cv);
+      }
     } catch (e) {
       _showError('Import du CV impossible : $e');
     } finally {
-      if (mounted) setState(() => _uploading = false);
+      if (mounted) {
+        setState(() => _uploading = false);
+      }
     }
   }
 
   Future<void> _submit() async {
     setState(() => _saving = true);
+
     try {
-      final service = ProfileService();
       final interests = _interests.text
           .split(',')
           .map((e) => e.trim())
           .where((e) => e.isNotEmpty)
           .toList();
 
-      await service.saveCandidate(
-        {
-          'age': int.parse(_age.text.trim()),
-          'gender': _gender,
-          'sector': _sector.text.trim(),
-          'study_field': _studyField.text.trim(),
-          'education_level': _educationLevel,
-          'diploma': _diploma.text.trim(),
-          'country': _country.text.trim(),
-          'region': _region.text.trim(),
-          'availability': _availability,
-          'mobility': _mobility,
-          'interview_language': _interviewLanguage,
-          'interests': interests,
-          'target_offer_description': _targetOffer.text.trim(),
-          'training_objective': _trainingObjective.text.trim(),
-          'cv_storage_path': _cv?.storagePath,
-        },
+      // Création du profil candidat
+      final p = CandidateProfile(
         fullName: '${_firstName.text.trim()} ${_lastName.text.trim()}',
+        age: int.parse(_age.text.trim()),
+        gender: _gender!,
+        country: _country.text.trim(),
+        region: _region.text.trim(),
+        studyField: _studyField.text.trim(),
+        educationLevel: _educationLevel!,
+        diploma: _diploma.text.trim(),
+        sector: _sector.text.trim(),
+        availability: _availability!,
+        mobility: _mobility,
+        interviewLanguage: _interviewLanguage!,
+        interests: interests,
+        targetOfferDescription: _targetOffer.text.trim(),
+        trainingObjective: _trainingObjective.text.trim(),
       );
+
+      // Enregistrement via le backend Spring Boot / API
+      final candidateService = CandidateService();
+
+      await candidateService.submitOnboarding(p);
+
+      // Enregistrement du CV
       if (_cv != null) {
-        await CvService().register(await service.profileId(), _cv!);
+        final profileId = await ProfileService().profileId();
+
+        await CvService().register(profileId, _cv!);
       }
+
       if (!mounted) return;
+
+      // Retour vers AuthGate après validation
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const AuthGate()),
-            (_) => false,
+        (_) => false,
       );
     } catch (e) {
       if (!mounted) return;
+
       setState(() => _saving = false);
+
       _showError('Erreur : $e');
     }
   }
 
   void _showError(String msg) {
     if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _logout() async {
     await AuthService().signOut();
+
     if (!mounted) return;
+
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const AuthGate()),
-          (_) => false,
+      (_) => false,
     );
   }
 
@@ -184,9 +228,10 @@ class _CandidateOnboardingScreenState extends State<CandidateOnboardingScreen> {
         title: Text('Profil candidat (${_step + 1}/3)'),
         actions: [
           IconButton(
-              icon: const Icon(Icons.logout),
-              tooltip: 'Se déconnecter',
-              onPressed: _logout),
+            icon: const Icon(Icons.logout),
+            tooltip: 'Se déconnecter',
+            onPressed: _logout,
+          ),
         ],
       ),
       body: Column(
@@ -217,9 +262,10 @@ class _CandidateOnboardingScreenState extends State<CandidateOnboardingScreen> {
                       onPressed: _saving ? null : _next,
                       child: _saving
                           ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2))
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
                           : Text(_step < 2 ? 'Suivant' : 'Terminer'),
                     ),
                   ),
@@ -236,29 +282,35 @@ class _CandidateOnboardingScreenState extends State<CandidateOnboardingScreen> {
     padding: const EdgeInsets.all(16),
     child: Form(
       key: _formKeys[0],
-      child: Column(children: [
-        AppTextField(controller: _firstName, label: 'Prénom'),
-        AppTextField(controller: _lastName, label: 'Nom'),
-        AppTextField(
-          controller: _age,
-          label: 'Âge',
-          keyboardType: TextInputType.number,
-          validator: (v) {
-            final n = int.tryParse((v ?? '').trim());
-            if (n == null) return 'Entrez un nombre';
-            if (n < 16 || n > 80) return 'Âge entre 16 et 80';
-            return null;
-          },
-        ),
-        AppDropdown(
-          label: 'Sexe',
-          value: _gender,
-          items: _genders,
-          onChanged: (v) => setState(() => _gender = v),
-        ),
-        AppTextField(controller: _country, label: 'Pays'),
-        AppTextField(controller: _region, label: 'Région / Ville'),
-      ]),
+      child: Column(
+        children: [
+          AppTextField(controller: _firstName, label: 'Prénom'),
+          AppTextField(controller: _lastName, label: 'Nom'),
+          AppTextField(
+            controller: _age,
+            label: 'Âge',
+            keyboardType: TextInputType.number,
+            validator: (v) {
+              final n = int.tryParse((v ?? '').trim());
+
+              if (n == null) return 'Entrez un nombre';
+              if (n < 16 || n > 80) {
+                return 'Âge entre 16 et 80';
+              }
+
+              return null;
+            },
+          ),
+          AppDropdown(
+            label: 'Sexe',
+            value: _gender,
+            items: _genders,
+            onChanged: (v) => setState(() => _gender = v),
+          ),
+          AppTextField(controller: _country, label: 'Pays'),
+          AppTextField(controller: _region, label: 'Région / Ville'),
+        ],
+      ),
     ),
   );
 
@@ -266,40 +318,46 @@ class _CandidateOnboardingScreenState extends State<CandidateOnboardingScreen> {
     padding: const EdgeInsets.all(16),
     child: Form(
       key: _formKeys[1],
-      child: Column(children: [
-        AppTextField(
-            controller: _sector, label: 'Secteur (ex : Informatique)'),
-        AppTextField(
-            controller: _studyField, label: "Domaine d'études"),
-        AppDropdown(
-          label: "Niveau d'études",
-          value: _educationLevel,
-          items: _levels,
-          onChanged: (v) => setState(() => _educationLevel = v),
-        ),
-        AppTextField(controller: _diploma, label: 'Diplôme'),
-        AppTextField(
-          controller: _interests,
-          label: "Centres d'intérêt (séparés par des virgules)",
-          required: false,
-        ),
-        const SizedBox(height: 4),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: OutlinedButton.icon(
-            onPressed: _uploading ? null : _pickCv,
-            icon: _uploading
-                ? const SizedBox(
-                height: 16,
-                width: 16,
-                child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.upload_file),
-            label: Text(_cv == null
-                ? 'Importer mon CV (PDF / DOCX)'
-                : 'CV : ${_cv!.fileName}'),
+      child: Column(
+        children: [
+          AppTextField(
+            controller: _sector,
+            label: 'Secteur (ex : Informatique)',
           ),
-        ),
-      ]),
+          AppTextField(controller: _studyField, label: "Domaine d'études"),
+          AppDropdown(
+            label: "Niveau d'études",
+            value: _educationLevel,
+            items: _levels,
+            onChanged: (v) => setState(() => _educationLevel = v),
+          ),
+          AppTextField(controller: _diploma, label: 'Diplôme'),
+          AppTextField(
+            controller: _interests,
+            label: "Centres d'intérêt (séparés par des virgules)",
+            required: false,
+          ),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: _uploading ? null : _pickCv,
+              icon: _uploading
+                  ? const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.upload_file),
+              label: Text(
+                _cv == null
+                    ? 'Importer mon CV (PDF / DOCX)'
+                    : 'CV : ${_cv!.fileName}',
+              ),
+            ),
+          ),
+        ],
+      ),
     ),
   );
 
@@ -307,37 +365,39 @@ class _CandidateOnboardingScreenState extends State<CandidateOnboardingScreen> {
     padding: const EdgeInsets.all(16),
     child: Form(
       key: _formKeys[2],
-      child: Column(children: [
-        AppDropdown(
-          label: 'Disponibilité',
-          value: _availability,
-          items: _availabilities,
-          onChanged: (v) => setState(() => _availability = v),
-        ),
-        AppDropdown(
-          label: "Langue de l'entretien",
-          value: _interviewLanguage,
-          items: _languages,
-          onChanged: (v) => setState(() => _interviewLanguage = v),
-        ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Prêt(e) à me déplacer'),
-          value: _mobility,
-          onChanged: (v) => setState(() => _mobility = v),
-        ),
-        const SizedBox(height: 8),
-        AppTextField(
-          controller: _targetOffer,
-          label: "Description de l'offre souhaitée",
-          maxLines: 4,
-        ),
-        AppTextField(
-          controller: _trainingObjective,
-          label: "Objectif de l'entraînement",
-          maxLines: 3,
-        ),
-      ]),
+      child: Column(
+        children: [
+          AppDropdown(
+            label: 'Disponibilité',
+            value: _availability,
+            items: _availabilities,
+            onChanged: (v) => setState(() => _availability = v),
+          ),
+          AppDropdown(
+            label: "Langue de l'entretien",
+            value: _interviewLanguage,
+            items: _languages,
+            onChanged: (v) => setState(() => _interviewLanguage = v),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Prêt(e) à me déplacer'),
+            value: _mobility,
+            onChanged: (v) => setState(() => _mobility = v),
+          ),
+          const SizedBox(height: 8),
+          AppTextField(
+            controller: _targetOffer,
+            label: "Description de l'offre souhaitée",
+            maxLines: 4,
+          ),
+          AppTextField(
+            controller: _trainingObjective,
+            label: "Objectif de l'entraînement",
+            maxLines: 3,
+          ),
+        ],
+      ),
     ),
   );
 }

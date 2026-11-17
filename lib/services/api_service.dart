@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
+
 import '../config/api_config.dart';
 
 class ApiException implements Exception {
@@ -24,20 +26,62 @@ class ApiService {
     };
   }
 
-  Future<dynamic> get(String path) =>
-      _send(() async => http.get(Uri.parse('${ApiConfig.baseUrl}$path'),
-          headers: await _headers()));
+  Future<dynamic> get(String path) => _send(
+    () async => http.get(
+      Uri.parse('${ApiConfig.baseUrl}$path'),
+      headers: await _headers(),
+    ),
+  );
 
-  Future<dynamic> put(String path, Object body) =>
-      _send(() async => http.put(Uri.parse('${ApiConfig.baseUrl}$path'),
-          headers: await _headers(), body: jsonEncode(body)));
+  Future<dynamic> put(String path, Object body) => _send(
+    () async => http.put(
+      Uri.parse('${ApiConfig.baseUrl}$path'),
+      headers: await _headers(),
+      body: jsonEncode(body),
+    ),
+  );
+  Future<dynamic> post(String path, Object body) => _send(
+    () async => http.post(
+      Uri.parse('${ApiConfig.baseUrl}$path'),
+      headers: await _headers(),
+      body: jsonEncode(body),
+    ),
+  );
+
+  Future<dynamic> delete(String path) => _send(
+    () async => http.delete(
+      Uri.parse('${ApiConfig.baseUrl}$path'),
+      headers: await _headers(),
+    ),
+  );
+
+  /// Envoi d'un fichier (multipart), champ "file"
+  Future<dynamic> uploadFile(
+    String path,
+    String filePath,
+    String fileName,
+  ) => _send(() async {
+    final req = http.MultipartRequest(
+      'POST',
+      Uri.parse('${ApiConfig.baseUrl}$path'),
+    );
+    final headers = await _headers();
+    headers.remove('Content-Type'); // multipart fixe son propre Content-Type
+    req.headers.addAll(headers);
+    req.files.add(
+      await http.MultipartFile.fromPath('file', filePath, filename: fileName),
+    );
+    return http.Response.fromStream(await req.send());
+  });
 
   Future<dynamic> _send(Future<http.Response> Function() call) async {
     try {
       return _handle(await call().timeout(_timeout));
     } on TimeoutException {
-      throw ApiException('Le serveur ne répond pas. Vérifiez qu\'il est démarré '
-          'et que l\'adresse API_URL est correcte (${ApiConfig.baseUrl}).');
+      throw ApiException(
+        'Le serveur ne répond pas. Vérifiez qu\'il est démarré '
+        'et que l\'adresse API_URL est correcte (${ApiConfig.baseUrl}).',
+      );
     } on SocketException {
       throw ApiException('Serveur injoignable (${ApiConfig.baseUrl}).');
     }
