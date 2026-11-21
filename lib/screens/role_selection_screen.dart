@@ -1,7 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import '../core/app_colors.dart';
+import '../core/app_theme.dart';
 import '../models/user_role.dart';
 import '../services/auth_service.dart';
 import '../services/profile_service.dart';
@@ -9,6 +9,7 @@ import '../widgets/primary_button.dart';
 import '../widgets/role_card.dart';
 import '../widgets/skillmirror_logo.dart';
 import 'auth_gate.dart';
+import 'settings_screen.dart';
 
 class RoleSelectionScreen extends StatefulWidget {
   const RoleSelectionScreen({super.key});
@@ -27,8 +28,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   /// Inscription : Google + création du compte avec le rôle choisi.
@@ -42,7 +42,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
         if (!mounted) return;
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const AuthGate()),
-          (_) => false,
+              (_) => false,
         );
         return;
       }
@@ -80,34 +80,47 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: context.palette.background,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SkillMirrorLogo(),
+              Row(
+                children: [
+                  const SkillMirrorLogo(),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Apparence',
+                    icon: Icon(Icons.settings_outlined,
+                        color: context.palette.textSecondary),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 28),
               Expanded(
                 child: SingleChildScrollView(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Le bon profil, au bon\nrecruteur',
                         style: TextStyle(
-                          color: AppColors.textPrimary,
+                          color: context.palette.textPrimary,
                           fontSize: 28,
                           fontWeight: FontWeight.w800,
                           height: 1.2,
                         ),
                       ),
                       const SizedBox(height: 10),
-                      const Text(
+                      Text(
                         'Choisissez comment vous utilisez SkillMirror.',
                         style: TextStyle(
-                          color: AppColors.textSecondary,
+                          color: context.palette.textSecondary,
                           fontSize: 14,
                         ),
                       ),
@@ -129,26 +142,23 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                   padding: EdgeInsets.only(bottom: 12),
                   child: LinearProgressIndicator(),
                 ),
-              PrimaryButton(
-                label: 'Continuer avec Google',
-                onPressed: _onContinue,
-              ),
+              PrimaryButton(label: 'Continuer avec Google', onPressed: _onContinue),
               const SizedBox(height: 14),
               Center(
                 child: GestureDetector(
                   onTap: _onLogin,
-                  child: const Text.rich(
+                  child: Text.rich(
                     TextSpan(
                       text: 'Déjà un compte ? ',
                       style: TextStyle(
-                        color: AppColors.textSecondary,
+                        color: context.palette.textSecondary,
                         fontSize: 12.5,
                       ),
                       children: [
                         TextSpan(
                           text: 'Se connecter',
                           style: TextStyle(
-                            color: AppColors.textPrimary,
+                            color: context.palette.textPrimary,
                             fontWeight: FontWeight.w700,
                           ),
                         ),

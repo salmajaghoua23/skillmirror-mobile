@@ -21,3 +21,4 @@ spring:
 
 firebase:
   credentials-path: ${FIREBASE_CREDENTIALS}
+

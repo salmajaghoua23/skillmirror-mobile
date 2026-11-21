@@ -34,3 +34,4 @@ build/
 *firebase-adminsdk*.json
 serviceAccountKey.json
 .env
+run-dev.ps1

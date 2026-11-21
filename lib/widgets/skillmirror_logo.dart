@@ -1,21 +1,22 @@
 import 'package:flutter/material.dart';
 
 import '../core/app_colors.dart';
+import '../core/app_theme.dart';
 
 class SkillMirrorLogo extends StatelessWidget {
   const SkillMirrorLogo({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const Row(
+    return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.bar_chart_rounded, color: AppColors.primary, size: 28),
-        SizedBox(width: 8),
+        const Icon(Icons.bar_chart_rounded, color: AppColors.primary, size: 28),
+        const SizedBox(width: 8),
         Text(
           'SkillMirror',
           style: TextStyle(
-            color: AppColors.textPrimary,
+            color: context.palette.textPrimary,
             fontSize: 18,
             fontWeight: FontWeight.w700,
           ),

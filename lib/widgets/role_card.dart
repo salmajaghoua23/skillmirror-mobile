@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/app_colors.dart';
+import '../core/app_theme.dart';
 import '../models/user_role.dart';
 
 class RoleCard extends StatelessWidget {
@@ -17,18 +18,17 @@ class RoleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: selected
-              ? AppColors.primary.withValues(alpha: 0.08)
-              : AppColors.card,
+          color: selected ? AppColors.primary.withValues(alpha: 0.08) : p.card,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: selected ? AppColors.primary : AppColors.cardBorder,
+            color: selected ? AppColors.primary : p.cardBorder,
             width: selected ? 1.5 : 1,
           ),
         ),
@@ -50,8 +50,8 @@ class RoleCard extends StatelessWidget {
                 children: [
                   Text(
                     role.title,
-                    style: const TextStyle(
-                      color: AppColors.textPrimary,
+                    style: TextStyle(
+                      color: p.textPrimary,
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
                     ),
@@ -59,8 +59,8 @@ class RoleCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     role.description,
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
+                    style: TextStyle(
+                      color: p.textSecondary,
                       fontSize: 12.5,
                       height: 1.35,
                     ),
