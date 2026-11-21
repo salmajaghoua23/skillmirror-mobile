@@ -51,5 +51,5 @@ app.*.map.json
 *.keystore
 key.properties
 android/key.properties
-
+backend/run-dev.ps1
 /lib/backend/run-dev.ps1

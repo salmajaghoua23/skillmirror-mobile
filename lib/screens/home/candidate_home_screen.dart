@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-
 import '../../services/auth_service.dart';
-import '../candidate/profile_screen.dart';
+import '../settings_screen.dart';
 
 class CandidateHomeScreen extends StatelessWidget {
   const CandidateHomeScreen({super.key});
@@ -13,17 +12,15 @@ class CandidateHomeScreen extends StatelessWidget {
         title: const Text('SkillMirror – Candidat'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.account_circle),
-            tooltip: 'Mon profil',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ProfileScreen()),
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Apparence',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SettingsScreen()),
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () => AuthService().signOut(),
-          ),
+              icon: const Icon(Icons.logout),
+              onPressed: () => AuthService().signOut()),
         ],
       ),
       body: const Center(child: Text('Bienvenue, candidat !')),
