@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/candidate_cv.dart';
 import '../../services/candidate_cv_service.dart';
+import 'cv_analysis_screen.dart';
 
 class CvScreen extends StatefulWidget {
   const CvScreen({super.key});
@@ -41,9 +42,11 @@ class _CvScreenState extends State<CvScreen> {
     );
     final file = result?.files.single;
     if (file == null || file.path == null) return;
+
     setState(() => _busy = true);
+    CandidateCv? uploaded;
     try {
-      await _service.upload(file.path!, file.name);
+      uploaded = await _service.upload(file.path!, file.name);
       _msg('CV ajouté');
       _reload();
     } catch (_) {
@@ -51,7 +54,15 @@ class _CvScreenState extends State<CvScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+
+    if (uploaded == null || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => CvAnalysisScreen(cvId: uploaded!.id.toString())),
+    );
+    _reload();
   }
+
 
   Future<void> _setActive(CandidateCv cv) async {
     try {

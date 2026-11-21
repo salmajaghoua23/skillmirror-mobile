@@ -1,4 +1,4 @@
-package com.skillmirror.candidate;
+package com.skillmirror.candidate.service;
 
 import com.skillmirror.account.AccountRepository;
 import com.skillmirror.common.Profile;

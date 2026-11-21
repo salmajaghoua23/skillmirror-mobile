@@ -1,4 +1,4 @@
-package com.skillmirror.candidate;
+package com.skillmirror.candidate.controller;
 
 import com.skillmirror.account.CurrentUser;
 import com.skillmirror.candidate.dto.CvResponse;
@@ -6,7 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-
+import com.skillmirror.candidate.service.CvService;
 import java.util.List;
 import java.util.UUID;
 

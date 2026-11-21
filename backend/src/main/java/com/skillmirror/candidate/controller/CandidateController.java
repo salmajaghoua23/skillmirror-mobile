@@ -1,5 +1,5 @@
-package com.skillmirror.candidate;
-
+package com.skillmirror.candidate.controller;
+import com.skillmirror.candidate.service.CandidateService;
 import com.skillmirror.account.CurrentUser;
 import com.skillmirror.candidate.dto.*;
 import jakarta.validation.Valid;

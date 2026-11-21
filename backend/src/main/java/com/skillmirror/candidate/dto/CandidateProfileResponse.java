@@ -1,6 +1,6 @@
 package com.skillmirror.candidate.dto;
 
-import com.skillmirror.candidate.CandidateProfile;
+import com.skillmirror.candidate.entity.CandidateProfile;
 import com.skillmirror.common.Profile;
 
 import java.util.List;

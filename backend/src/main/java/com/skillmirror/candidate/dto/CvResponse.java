@@ -1,6 +1,6 @@
 package com.skillmirror.candidate.dto;
 
-import com.skillmirror.candidate.CandidateCv;
+import com.skillmirror.candidate.entity.CandidateCv;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;

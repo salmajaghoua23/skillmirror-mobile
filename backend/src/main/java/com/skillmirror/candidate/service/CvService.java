@@ -1,5 +1,9 @@
-package com.skillmirror.candidate;
+package com.skillmirror.candidate.service;
 
+import com.skillmirror.candidate.entity.CandidateCv;
+import com.skillmirror.candidate.repository.CandidateCvRepository;
+import com.skillmirror.candidate.repository.CandidateProfileRepository;
+import com.skillmirror.candidate.entity.CandidateProfile;
 import com.skillmirror.candidate.dto.CvResponse;
 import com.skillmirror.common.Profile;
 import lombok.RequiredArgsConstructor;

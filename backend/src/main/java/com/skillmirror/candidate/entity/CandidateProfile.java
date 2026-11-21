@@ -1,4 +1,4 @@
-package com.skillmirror.candidate;
+package com.skillmirror.candidate.entity;
 
 import jakarta.persistence.*;
 import lombok.Getter;
