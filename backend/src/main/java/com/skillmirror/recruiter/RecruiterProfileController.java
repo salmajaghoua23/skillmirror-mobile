@@ -14,12 +14,12 @@ public class RecruiterProfileController {
 
     @GetMapping("/profile")
     public RecruiterProfileResponse get(Authentication auth) {
-        return service.get((String) auth.getPrincipal());
+        return service.get(auth.getName());
     }
 
     @PutMapping("/profile")
     public RecruiterProfileResponse save(Authentication auth,
                                          @Valid @RequestBody RecruiterProfileRequest req) {
-        return service.save((String) auth.getPrincipal(), req);
+        return service.save(auth.getName(), req);
     }
 }
