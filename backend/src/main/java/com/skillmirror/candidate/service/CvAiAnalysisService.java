@@ -26,11 +26,17 @@ public class CvAiAnalysisService {
     @Value("${ollama.url:http://localhost:11434}") private String ollamaUrl;
     @Value("${ollama.model:llama3.2:3b}") private String model;
     @Value("${ollama.timeout-seconds:180}") private long timeoutSeconds;
+    @Value("${ollama.enabled:true}") private boolean enabled;
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final HttpClient client = HttpClient.newHttpClient();
+    private final HttpClient client = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(2))
+            .build();
 
     public CvAnalysisData analyze(String cvText) {
+        if (!enabled) {
+            return analyzeWithRules(cvText);
+        }
         try {
             return analyzeWithOllama(cvText).normalized();
         } catch (Exception e) {

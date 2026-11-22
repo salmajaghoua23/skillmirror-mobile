@@ -28,8 +28,7 @@ public class CvAnalysisService {
     /** Analyse du dernier CV du candidat connecté (pour le dashboard). */
     public CvAnalysisResponse latest(String uid) {
         Profile p = access.candidate(uid);
-        return cvRepository.findFirstByProfileIdAndMainTrueOrderByUploadedAtDesc(p.getId())
-                .or(() -> cvRepository.findFirstByProfileIdOrderByUploadedAtDesc(p.getId()))
+        return cvRepository.findFirstByProfileIdOrderByUploadedAtDesc(p.getId())
                 .map(cv -> get(uid, cv.getId()))
                 .orElse(null);
     }
