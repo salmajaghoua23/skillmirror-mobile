@@ -12,7 +12,13 @@ class CvAnalysisService {
   }
 
   Future<Map<String, dynamic>> run(String cvId) async =>
-      Map<String, dynamic>.from(await _api.post('$_base/$cvId/analysis/run', {}) as Map);
+      Map<String, dynamic>.from(
+        await _api.post(
+          '$_base/$cvId/analysis/run',
+          {},
+          timeout: const Duration(minutes: 3),
+        ) as Map,
+      );
 
   Future<Map<String, dynamic>> get(String cvId) async =>
       Map<String, dynamic>.from(await _api.get('$_base/$cvId/analysis') as Map);

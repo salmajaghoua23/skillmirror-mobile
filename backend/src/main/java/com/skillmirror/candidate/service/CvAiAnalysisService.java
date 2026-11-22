@@ -24,8 +24,8 @@ public class CvAiAnalysisService {
     private static final Logger log = LoggerFactory.getLogger(CvAiAnalysisService.class);
 
     @Value("${ollama.url:http://localhost:11434}") private String ollamaUrl;
-    @Value("${ollama.model:llama3.2:3b}") private String model;
-    @Value("${ollama.timeout-seconds:180}") private long timeoutSeconds;
+    @Value("${ollama.model:llama3.2:1b}") private String model;
+    @Value("${ollama.timeout-seconds:240}") private long timeoutSeconds;
     @Value("${ollama.enabled:true}") private boolean enabled;
 
     private final ObjectMapper mapper = new ObjectMapper();
@@ -47,7 +47,7 @@ public class CvAiAnalysisService {
 
     // ---------- 1) IA locale ----------
     private CvAnalysisData analyzeWithOllama(String cvText) throws Exception {
-        String text = cvText.length() > 12000 ? cvText.substring(0, 12000) : cvText;
+        String text = cvText.length() > 4000 ? cvText.substring(0, 4000) : cvText;
         String prompt = """
                 Tu es un expert en analyse de CV. Extrais les informations du CV ci-dessous.
                 Réponds UNIQUEMENT avec un JSON valide, sans texte autour, avec exactement cette structure :
@@ -67,7 +67,8 @@ public class CvAiAnalysisService {
 
         Map<String, Object> body = Map.of(
                 "model", model, "prompt", prompt, "stream", false, "format", "json",
-                "options", Map.of("temperature", 0));
+                "keep_alive", "30m",
+                "options", Map.of("temperature", 0, "num_predict", 800, "num_ctx", 4096));
 
         HttpRequest req = HttpRequest.newBuilder(URI.create(ollamaUrl + "/api/generate"))
                 .timeout(Duration.ofSeconds(timeoutSeconds))
