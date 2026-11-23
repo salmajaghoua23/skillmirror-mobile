@@ -1,5 +1,7 @@
 server:
   port: 8080
+  error:
+    include-message: always
 
 spring:
   application:
@@ -28,5 +30,6 @@ supabase:
 
 ollama:
   url: http://localhost:11434
-  model: llama3.2:3b
-  timeout-seconds: 180
+  model: llama3.2:1b
+  timeout-seconds: 240
+  enabled: false

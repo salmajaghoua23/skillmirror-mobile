@@ -24,6 +24,10 @@ public class Skill {
 
     private String name;
 
+    private String category;
+
+    private String description;
+
     /** TECHNICAL | SOFT */
     @Column(name = "skill_type")
     private String skillType;
