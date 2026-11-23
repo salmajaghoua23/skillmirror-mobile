@@ -16,7 +16,7 @@ class CvAnalysisService {
         await _api.post(
           '$_base/$cvId/analysis/run',
           {},
-          timeout: const Duration(minutes: 3),
+          timeout: const Duration(minutes: 12),
         ) as Map,
       );
 

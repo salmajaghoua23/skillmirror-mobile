@@ -8,7 +8,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -23,10 +24,10 @@ public class CvAiAnalysisService {
 
     private static final Logger log = LoggerFactory.getLogger(CvAiAnalysisService.class);
 
-    @Value("${ollama.url:http://localhost:11434}") private String ollamaUrl;
-    @Value("${ollama.model:llama3.2:1b}") private String model;
-    @Value("${ollama.timeout-seconds:240}") private long timeoutSeconds;
-    @Value("${ollama.enabled:true}") private boolean enabled;
+    @Value("${ollama.enabled}") private boolean enabled;
+    @Value("${ollama.url}") private String ollamaUrl;
+    @Value("${ollama.model}") private String model;
+    @Value("${ollama.timeout-seconds}") private long timeoutSeconds;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient client = HttpClient.newBuilder()
@@ -46,29 +47,95 @@ public class CvAiAnalysisService {
     }
 
     // ---------- 1) IA locale ----------
-    private CvAnalysisData analyzeWithOllama(String cvText) throws Exception {
-        String text = cvText.length() > 4000 ? cvText.substring(0, 4000) : cvText;
-        String prompt = """
-                Tu es un expert en analyse de CV. Extrais les informations du CV ci-dessous.
-                Réponds UNIQUEMENT avec un JSON valide, sans texte autour, avec exactement cette structure :
-                {
-                  "technicalSkills": ["..."],
-                  "softSkills": ["..."],
-                  "education": [{"degree":"","institution":"","field":"","startYear":"","endYear":""}],
-                  "experiences": [{"title":"","company":"","startDate":"","endDate":"","description":""}],
-                  "languages": [{"name":"","level":""}],
-                  "certifications": [{"name":"","issuer":"","year":""}],
-                  "summary": "résumé du profil en 2 phrases"
-                }
-                Règles : n'invente rien, laisse "" si l'information est absente, compétences en 1 à 3 mots.
+    private static final String RULES = """
+        Règles générales :
+        - Réponds uniquement avec un JSON conforme au schéma demandé.
+        - N'invente rien : utilise seulement ce qui est écrit dans le CV.
+        - Ignore les textes entre crochets [ ... ] : ce sont des champs non remplis.
+        - Laisse "" quand une information est absente.
+        - Écris les années au format "2024".
+        """;
 
-                CV :
-                """ + text;
+    private static final String TASK_SKILLS = """
+        TÂCHE : extraire les compétences et un résumé.
+        - technicalSkills : compétences métier et techniques (langages, logiciels, outils, méthodes, domaines
+          comme comptabilité, fiscalité, SQL, Docker...). Un élément court par compétence (1 à 4 mots).
+          Inclus celles listées dans le CV et celles clairement utilisées dans les stages et projets.
+          Pas de phrases, pas de langues parlées, pas de qualités personnelles.
+        - softSkills : qualités personnelles citées dans le CV (ex : rigueur, esprit d'équipe).
+        - summary : 2 phrases en français décrivant le profil du candidat.
+        """;
+
+    private static final String TASK_BACKGROUND = """
+        TÂCHE : extraire formations, certifications et langues.
+        - education : uniquement les diplômes et cursus (pas les stages ni les projets).
+          degree = intitulé du diplôme sans le nom de l'école ; institution = école, faculté ou université ;
+          field = spécialité.
+          Exemple : {"degree":"Licence en Économie","institution":"Université Hassan II","field":"Économie","startYear":"2020","endYear":"2023"}
+        - certifications : certificats et attestations obtenus (jamais un titre de section).
+        - languages : langues parlées, avec le niveau tel qu'écrit dans le CV (B2, courant, natif...).
+          Exemple : {"name":"Français","level":"B2"}
+        """;
+
+    private static final String TASK_EXPERIENCES = """
+        TÂCHE : extraire les expériences.
+        - experiences : stages, emplois et projets (un élément chacun).
+          title = intitulé du poste ou du projet ; company = entreprise ou organisme ("" pour un projet personnel) ;
+          startDate et endDate = dates telles qu'écrites dans le CV ; description = une phrase sur les missions (25 mots max).
+          Exemple : {"title":"Stagiaire développeur","company":"Délégation de la Santé","startDate":"Juil 2025","endDate":"Août 2025","description":"Développement d'une application web de suivi des vaccinations."}
+        """;
+
+    private static final String SCHEMA_SKILLS = """
+        {"type":"object","properties":{
+          "technicalSkills":{"type":"array","items":{"type":"string"}},
+          "softSkills":{"type":"array","items":{"type":"string"}},
+          "summary":{"type":"string"}},
+         "required":["technicalSkills","softSkills","summary"]}
+        """;
+
+    private static final String SCHEMA_BACKGROUND = """
+        {"type":"object","properties":{
+          "education":{"type":"array","items":{"type":"object","properties":{
+            "degree":{"type":"string"},"institution":{"type":"string"},"field":{"type":"string"},
+            "startYear":{"type":"string"},"endYear":{"type":"string"}},
+            "required":["degree","institution"]}},
+          "certifications":{"type":"array","items":{"type":"object","properties":{
+            "name":{"type":"string"},"issuer":{"type":"string"},"year":{"type":"string"}},
+            "required":["name"]}},
+          "languages":{"type":"array","items":{"type":"object","properties":{
+            "name":{"type":"string"},"level":{"type":"string"}},"required":["name"]}}},
+         "required":["education","certifications","languages"]}
+        """;
+
+    private static final String SCHEMA_EXPERIENCES = """
+        {"type":"object","properties":{
+          "experiences":{"type":"array","items":{"type":"object","properties":{
+            "title":{"type":"string"},"company":{"type":"string"},"startDate":{"type":"string"},
+            "endDate":{"type":"string"},"description":{"type":"string"}},
+            "required":["title","company"]}}},
+         "required":["experiences"]}
+        """;
+
+    private CvAnalysisData analyzeWithOllama(String cvText) throws Exception {
+        String text = cvText.length() > 15000 ? cvText.substring(0, 15000) : cvText;
+
+        ObjectNode merged = mapper.createObjectNode();
+        merged.setAll(ask("compétences", text, TASK_SKILLS, SCHEMA_SKILLS));
+        merged.setAll(ask("formations", text, TASK_BACKGROUND, SCHEMA_BACKGROUND));
+        merged.setAll(ask("expériences", text, TASK_EXPERIENCES, SCHEMA_EXPERIENCES));
+        return mapper.treeToValue(merged, CvAnalysisData.class);
+    }
+
+    /** Un appel Ollama ciblé ; un seul nouvel essai si le JSON renvoyé est invalide. */
+    private ObjectNode ask(String name, String text, String task, String schema) throws Exception {
+        String prompt = "Voici le CV d'un candidat (tous secteurs possibles) :\n\n<cv>\n" + text
+                + "\n</cv>\n\n" + RULES + "\n" + task;
 
         Map<String, Object> body = Map.of(
-                "model", model, "prompt", prompt, "stream", false, "format", "json",
-                "keep_alive", "30m",
-                "options", Map.of("temperature", 0, "num_predict", 800, "num_ctx", 4096));
+                "model", model, "prompt", prompt, "stream", false,
+                "format", mapper.readTree(schema),
+                "keep_alive", "10m",
+                "options", Map.of("temperature", 0, "num_ctx", 8192, "num_predict", 1500));
 
         HttpRequest req = HttpRequest.newBuilder(URI.create(ollamaUrl + "/api/generate"))
                 .timeout(Duration.ofSeconds(timeoutSeconds))
@@ -76,11 +143,21 @@ public class CvAiAnalysisService {
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
                 .build();
 
-        HttpResponse<String> res = client.send(req, HttpResponse.BodyHandlers.ofString());
-        if (res.statusCode() != 200) throw new IllegalStateException("HTTP " + res.statusCode());
-
-        JsonNode root = mapper.readTree(res.body());
-        return mapper.readValue(root.get("response").asText(), CvAnalysisData.class);
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            HttpResponse<String> res = client.send(req, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() != 200) {
+                throw new IllegalStateException("HTTP " + res.statusCode() + " (modèle '" + model + "' téléchargé ?)");
+            }
+            try {
+                String json = mapper.readTree(res.body()).get("response").asText();
+                log.info("Ollama [{}] -> {}", name, json.length() > 600 ? json.substring(0, 600) + "..." : json);
+                JsonNode node = mapper.readTree(json);
+                if (node.isObject()) return (ObjectNode) node;
+            } catch (JsonProcessingException e) {
+                log.warn("Ollama [{}] : JSON invalide (essai {}/2)", name, attempt);
+            }
+        }
+        throw new IllegalStateException("réponse JSON invalide pour « " + name + " »");
     }
 
     // ---------- 2) Secours sans IA ----------
