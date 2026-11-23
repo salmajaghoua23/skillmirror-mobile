@@ -22,7 +22,11 @@ class _CvScreenState extends State<CvScreen> {
     _future = _service.list();
   }
 
-  void _reload() => setState(() => _future = _service.list());
+  void _reload() {
+    setState(() {
+      _future = _service.list();
+    });
+  }
 
   void _msg(String text) {
     if (!mounted) return;
@@ -49,9 +53,9 @@ class _CvScreenState extends State<CvScreen> {
       uploaded = await _service.upload(file.path!, file.name);
       _msg('CV ajouté');
       _reload();
-    } catch (_) {
-      _msg("Échec de l'envoi du CV (PDF ou DOCX, 10 Mo max)");
-    } finally {
+    } catch (e) {
+      _msg("Échec de l'envoi : $e");
+    }finally {
       if (mounted) setState(() => _busy = false);
     }
 

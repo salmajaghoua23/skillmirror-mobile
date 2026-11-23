@@ -7,18 +7,12 @@ import com.skillmirror.candidate.entity.CandidateProfile;
 import com.skillmirror.candidate.dto.CvResponse;
 import com.skillmirror.common.Profile;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
+import com.skillmirror.candidate.exception.CvProcessingException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -27,13 +21,11 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CvService {
     private static final Set<String> ALLOWED_EXT = Set.of("pdf", "docx");
-
     private final CandidateAccess access;
     private final CandidateCvRepository cvRepo;
     private final CandidateProfileRepository candidateRepo;
+    private final CvStorageService storage;
 
-    @Value("${app.upload-dir:${user.home}/skillmirror-uploads}")
-    private String uploadDir;
 
     private CandidateCv owned(Profile p, UUID cvId) {
         return cvRepo.findByIdAndProfileId(cvId, p.getId()).orElseThrow(() ->
@@ -70,25 +62,35 @@ public class CvService {
         if (!ALLOWED_EXT.contains(ext)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Formats acceptés : PDF, DOCX");
         }
-        try {
-            Path dir = Paths.get(uploadDir, p.getId().toString());
-            Files.createDirectories(dir);
-            String stored = UUID.randomUUID() + "." + ext;
-            Files.copy(file.getInputStream(), dir.resolve(stored), StandardCopyOption.REPLACE_EXISTING);
 
+        String path = p.getId() + "/" + UUID.randomUUID() + "." + ext;
+        String contentType = ext.equals("pdf") ? "application/pdf"
+                : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+        // 1) le fichier part d'abord dans le bucket
+        try {
+            storage.upload(path, file.getBytes(), contentType);
+        } catch (java.io.IOException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Lecture du fichier impossible");
+        } catch (CvProcessingException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
+
+        // 2) la ligne en base n'est créée qu'ensuite
+        try {
             boolean first = cvRepo.findByProfileIdOrderByUploadedAtDesc(p.getId()).isEmpty();
             CandidateCv cv = new CandidateCv();
             cv.setProfileId(p.getId());
             cv.setFileName(original);
-            cv.setStoragePath(p.getId() + "/" + stored);
+            cv.setStoragePath(path);
             cv.setSizeBytes(file.getSize());
-            cv.setMain(first); // le premier CV est principal d'office
+            cv.setMain(first);
             cv = cvRepo.save(cv);
-
             syncCandidateCvPath(p);
             return CvResponse.from(cv);
-        } catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Échec de l'enregistrement du fichier");
+        } catch (RuntimeException e) {
+            storage.delete(path); // pas de fichier orphelin dans le bucket
+            throw e;
         }
     }
 
@@ -107,9 +109,7 @@ public class CvService {
         Profile p = access.candidate(uid);
         CandidateCv cv = owned(p, cvId);
         boolean wasMain = Boolean.TRUE.equals(cv.getMain());
-        try {
-            Files.deleteIfExists(Paths.get(uploadDir).resolve(cv.getStoragePath()));
-        } catch (IOException ignored) { }
+        storage.delete(cv.getStoragePath());
         cvRepo.delete(cv);
         cvRepo.flush();
 

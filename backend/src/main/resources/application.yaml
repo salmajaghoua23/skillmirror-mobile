@@ -29,7 +29,7 @@ supabase:
   cv-bucket: candidate_cvs                          # nom de ton bucket Storage
 
 ollama:
-  url: http://localhost:11434
-  model: llama3.2:1b
-  timeout-seconds: 240
-  enabled: false
+  url: ${OLLAMA_URL}
+  model: ${OLLAMA_MODEL}
+  enabled: ${OLLAMA_ENABLED}
+  timeout-seconds: ${OLLAMA_TIMEOUT}

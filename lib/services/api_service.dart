@@ -40,12 +40,13 @@ class ApiService {
       body: jsonEncode(body),
     ),
   );
-  Future<dynamic> post(String path, Object body) => _send(
-    () async => http.post(
+  Future<dynamic> post(String path, Object body, {Duration? timeout}) => _send(
+        () async => http.post(
       Uri.parse('${ApiConfig.baseUrl}$path'),
       headers: await _headers(),
       body: jsonEncode(body),
     ),
+    timeout: timeout,
   );
 
   Future<dynamic> delete(String path) => _send(
@@ -74,13 +75,16 @@ class ApiService {
     return http.Response.fromStream(await req.send());
   });
 
-  Future<dynamic> _send(Future<http.Response> Function() call) async {
+  Future<dynamic> _send(
+      Future<http.Response> Function() call, {
+        Duration? timeout,
+      }) async {
     try {
-      return _handle(await call().timeout(_timeout));
+      return _handle(await call().timeout(timeout ?? _timeout));
     } on TimeoutException {
       throw ApiException(
         'Le serveur ne répond pas. Vérifiez qu\'il est démarré '
-        'et que l\'adresse API_URL est correcte (${ApiConfig.baseUrl}).',
+            'et que l\'adresse API_URL est correcte (${ApiConfig.baseUrl}).',
       );
     } on SocketException {
       throw ApiException('Serveur injoignable (${ApiConfig.baseUrl}).');
