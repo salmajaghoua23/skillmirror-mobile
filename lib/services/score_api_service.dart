@@ -1,10 +1,13 @@
 
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
+
 import '../models/score_models.dart';
 
 class ScoreApiService {
-  final String baseUrl; // Émulateur Android : http://10.0.2.2:8080
+  final String baseUrl;
+
   final Future<String?> Function() tokenProvider;
 
   ScoreApiService(this.baseUrl, this.tokenProvider);
@@ -22,6 +25,7 @@ class ScoreApiService {
     };
   }
 
+  // Charger le Dashboard sans relancer Ollama
   Future<DashboardDto> getDashboard(String profileId) async {
     final r = await http.get(
       Uri.parse('$baseUrl/api/score/$profileId/dashboard'),
@@ -37,6 +41,7 @@ class ScoreApiService {
     );
   }
 
+  // Demander une nouvelle analyse Ollama
   Future<void> refresh(String profileId) async {
     final r = await http.post(
       Uri.parse('$baseUrl/api/score/$profileId/refresh'),

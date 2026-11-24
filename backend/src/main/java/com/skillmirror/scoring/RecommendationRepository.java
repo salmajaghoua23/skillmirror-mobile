@@ -9,7 +9,7 @@ import java.util.*;
 
 public interface RecommendationRepository extends JpaRepository<Recommendation, UUID> {
     List<Recommendation> findByProfileIdAndActiveTrueOrderByCreatedAtDesc(UUID profileId);
-
+    boolean existsByProfileIdAndActiveTrue(UUID profileId);
     @Modifying @Transactional
     @Query("update Recommendation r set r.active = false where r.profileId = :pid")
     void deactivateAll(@Param("pid") UUID profileId);

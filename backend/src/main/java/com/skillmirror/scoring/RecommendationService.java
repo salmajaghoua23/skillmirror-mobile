@@ -1,9 +1,9 @@
 
 package com.skillmirror.scoring;
 
-import com.skillmirror.skills.Skill;
-import com.skillmirror.skills.SkillRepository;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,98 +15,154 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RecommendationService {
 
+    private static final Logger log =
+            LoggerFactory.getLogger(RecommendationService.class);
+
     private final RecommendationRepository recoRepo;
     private final GapAnalysisService gapService;
-    private final CandidateSkillLevelRepository levelRepo;
-    private final SkillRepository skillRepo;
+    private final GoalSkillRequirementRepository requirementRepo;
 
+    private static final int MAX_RECOMMENDATIONS = 5;
+
+    // Générer uniquement si aucune recommandation active n'existe
+    @Transactional
+    public void generateIfNeeded(UUID profileId) {
+
+        List<Recommendation> existing =
+                recoRepo.findByProfileIdAndActiveTrueOrderByCreatedAtDesc(
+                        profileId
+                );
+
+        if (!existing.isEmpty()) {
+            log.info(
+                    "Recommandations déjà enregistrées pour {}",
+                    profileId
+            );
+            return;
+        }
+
+        generate(profileId);
+    }
+
+    // Génération ou régénération forcée
     @Transactional
     public void generate(UUID profileId) {
 
         // Désactiver les anciennes recommandations
         recoRepo.deactivateAll(profileId);
 
-        List<Recommendation> list = new ArrayList<>();
+        // Compétences manquantes ou insuffisantes
+        List<ScoringDtos.MissingSkillDto> missingSkills =
+                gapService.findMissingSkills(profileId);
 
-        // Éviter plusieurs recommandations pour la même compétence
-        Set<UUID> recommendedSkills = new HashSet<>();
+        // Récupérer les exigences sauvegardées
+        Map<UUID, Boolean> requiredMap =
+                requirementRepo.findByProfileId(profileId)
+                        .stream()
+                        .collect(Collectors.toMap(
+                                GoalSkillRequirement::getSkillId,
+                                r -> Boolean.TRUE.equals(r.getRequired()),
+                                (a, b) -> a
+                        ));
 
-        // Récupérer les noms des compétences
-        Map<UUID, String> skillNames = skillRepo.findAll()
-                .stream()
-                .collect(Collectors.toMap(
-                        Skill::getId,
-                        s -> s.getName() == null ? "Compétence" : s.getName(),
-                        (a, b) -> a
-                ));
+        // Priorité : obligatoires d'abord, puis plus grand écart
+        List<ScoringDtos.MissingSkillDto> prioritized =
+                missingSkills.stream()
+                        .collect(Collectors.toMap(
+                                ScoringDtos.MissingSkillDto::skillId,
+                                Function.identity(),
+                                (a, b) -> a,
+                                LinkedHashMap::new
+                        ))
+                        .values()
+                        .stream()
+                        .sorted(
+                                Comparator
+                                        .comparing(
+                                                (ScoringDtos.MissingSkillDto m) ->
+                                                        requiredMap.getOrDefault(
+                                                                m.skillId(), false
+                                                        )
+                                        )
+                                        .reversed()
+                                        .thenComparing(
+                                                Comparator.comparingInt(
+                                                        (ScoringDtos.MissingSkillDto m) ->
+                                                                m.requiredLevel()
+                                                                        - m.currentLevel()
+                                                ).reversed()
+                                        )
+                        )
+                        .limit(MAX_RECOMMENDATIONS)
+                        .toList();
 
-        // 1. Compétences absentes ou insuffisantes
-        for (var m : gapService.findMissingSkills(profileId)) {
+        List<Recommendation> recommendations =
+                new ArrayList<>();
 
-            if (!recommendedSkills.add(m.skillId())) {
-                continue;
-            }
+        for (ScoringDtos.MissingSkillDto skill : prioritized) {
 
-            int gap = m.requiredLevel() - m.currentLevel();
+            int gap =
+                    skill.requiredLevel() - skill.currentLevel();
 
-            Recommendation r = new Recommendation();
-            r.setProfileId(profileId);
-            r.setSkillId(m.skillId());
+            Recommendation recommendation =
+                    new Recommendation();
 
-            r.setPriority(
-                    gap >= 40 ? "HIGH" :
-                            gap >= 20 ? "MEDIUM" : "LOW"
+            recommendation.setProfileId(profileId);
+            recommendation.setSkillId(skill.skillId());
+            recommendation.setActive(true);
+
+            recommendation.setPriority(
+                    gap >= 40 ? "HIGH"
+                            : gap >= 20 ? "MEDIUM"
+                            : "LOW"
             );
 
-            if (m.currentLevel() == 0) {
-                r.setType("LEARN");
-                r.setMessage(
-                        "Apprenez " + m.skillName()
-                                + " : cette compétence est requise pour votre objectif."
+            if (skill.currentLevel() == 0) {
+
+                recommendation.setType("LEARN");
+
+                recommendation.setMessage(
+                        "Commencez à apprendre " + skill.skillName()
+                                + ". Cette compétence est nécessaire pour "
+                                + "votre objectif professionnel. "
+                                + "Niveau requis : "
+                                + skill.requiredLevel() + "%."
                 );
+
             } else {
-                r.setType("IMPROVE");
-                r.setMessage(
-                        "Améliorez " + m.skillName()
-                                + " : votre niveau est de " + m.currentLevel()
-                                + "% et le niveau requis est de "
-                                + m.requiredLevel() + "%."
+
+                recommendation.setType("IMPROVE");
+
+                recommendation.setMessage(
+                        "Améliorez votre niveau en "
+                                + skill.skillName()
+                                + ". Niveau actuel : "
+                                + skill.currentLevel()
+                                + "%, niveau requis : "
+                                + skill.requiredLevel() + "%."
                 );
             }
 
-            list.add(r);
+            recommendations.add(recommendation);
         }
 
-        // 2. Compétences issues du CV qui n'ont pas encore
-        // une recommandation LEARN ou IMPROVE
-        levelRepo.findByProfileId(profileId).stream()
-                .filter(l -> "CV".equals(l.getSource()))
-                .filter(l -> recommendedSkills.add(l.getSkillId()))
-                .forEach(l -> {
+        recoRepo.saveAll(recommendations);
 
-                    String name = skillNames.getOrDefault(
-                            l.getSkillId(), "cette compétence"
-                    );
-
-                    Recommendation r = new Recommendation();
-                    r.setProfileId(profileId);
-                    r.setSkillId(l.getSkillId());
-                    r.setType("ASSESS");
-                    r.setPriority("LOW");
-                    r.setMessage(
-                            "Passez un test pour évaluer votre niveau en "
-                                    + name + "."
-                    );
-
-                    list.add(r);
-                });
-
-        recoRepo.saveAll(list);
+        log.info(
+                "{} recommandations sauvegardées pour le profil {}",
+                recommendations.size(),
+                profileId
+        );
     }
 
-    public List<ScoringDtos.RecommendationDto> list(UUID profileId) {
+
+    public List<ScoringDtos.RecommendationDto> list(
+            UUID profileId) {
+
         return recoRepo
-                .findByProfileIdAndActiveTrueOrderByCreatedAtDesc(profileId)
+                .findByProfileIdAndActiveTrueOrderByCreatedAtDesc(
+                        profileId
+                )
                 .stream()
                 .map(r -> new ScoringDtos.RecommendationDto(
                         r.getId(),

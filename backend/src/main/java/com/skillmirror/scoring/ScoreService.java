@@ -1,3 +1,4 @@
+
 package com.skillmirror.scoring;
 
 import com.skillmirror.assessment.Assessment;
@@ -27,51 +28,113 @@ public class ScoreService {
     private final RecommendationService recoService;
 
     /**
-     * Calcul unique, appelé :
-     *  - après la confirmation du CV        -> source "INITIAL"
-     *  - après la fin d'une évaluation      -> source "ASSESSMENT"
+     * Calcul du score global du profil.
+     *
+     * Le score dépend uniquement :
+     * - du CV : 60 %
+     * - du formulaire : 40 %
+     *
+     * Les évaluations ne modifient jamais le score global.
+     *
+     * Les évaluations servent uniquement à mettre à jour
+     * les niveaux des compétences du candidat.
      */
     @Transactional
     public CandidateScore recompute(UUID profileId, String source) {
+
         var cv = cvLoader.load(profileId);
 
+        // 1. Calcul du score CV
         double cvScore = computeCvScore(cv);
+
+        // 2. Calcul du score formulaire
         double formScore = computeFormScore(profileId);
 
-        Map<UUID, Integer> assessed = latestAssessmentLevels(profileId);
-        rebuildSkillLevels(profileId, cv, assessed);                       // point 2
+        // 3. Récupération des dernières évaluations
+        Map<UUID, Integer> assessed =
+                latestAssessmentLevels(profileId);
 
-        double assessScore = assessed.values().stream().mapToInt(Integer::intValue).average().orElse(0);
-        double global = assessed.isEmpty()
-                ? cvScore * 0.6 + formScore * 0.4                          // point 1
-                : cvScore * 0.4 + formScore * 0.2 + assessScore * 0.4;     // points 6 et 7
+        // 4. Mise à jour des niveaux de compétences
+        // Les évaluations remplacent les niveaux estimés du CV.
+        rebuildSkillLevels(profileId, cv, assessed);
 
-        CandidateScore s = new CandidateScore();
-        s.setProfileId(profileId);
-        s.setCvScore(round(cvScore));
-        s.setFormScore(round(formScore));
-        s.setAssessmentScore(round(assessScore));
-        s.setGlobalScore(round(global));
-        s.setSource(source);
-        scoreRepo.save(s);
+        // 5. Score global indépendant des tests
+        double global = cvScore * 0.6 + formScore * 0.4;
 
-        recoService.generate(profileId);                                   // points 5 et 7
-        return s;
+        // 6. Sauvegarde du score
+        CandidateScore score = new CandidateScore();
+
+        score.setProfileId(profileId);
+        score.setCvScore(round(cvScore));
+        score.setFormScore(round(formScore));
+
+        // Conservé comme indicateur informatif uniquement
+        double assessmentScore = assessed.values()
+                .stream()
+                .mapToInt(Integer::intValue)
+                .average()
+                .orElse(0);
+
+        score.setAssessmentScore(round(assessmentScore));
+
+        // Le score global ne dépend pas de assessmentScore
+        score.setGlobalScore(round(global));
+        score.setSource(source);
+
+        scoreRepo.save(score);
+
+        // 7. Génération des recommandations
+        recoService.generateIfNeeded(profileId);
+
+        return score;
     }
 
-    private double computeCvScore(CvSnapshotLoader.CvSnapshot cv) {
-        double skills = Math.min(cv.skills().size() / 10.0, 1) * 40;
-        double exp    = Math.min(cv.experienceYears() / 5.0, 1) * 25;
-        double edu    = cv.educationCount() > 0 ? 15 : 0;
-        double lang   = Math.min(cv.languageCount() / 3.0, 1) * 10;
-        double cert   = Math.min(cv.certifications().size() / 2.0, 1) * 10;
-        return skills + exp + edu + lang + cert;
+    // --------------------------------------------------
+    // 1. Calcul du score CV (100 points)
+    // --------------------------------------------------
+
+    private double computeCvScore(
+            CvSnapshotLoader.CvSnapshot cv) {
+
+        double skills =
+                Math.min(cv.skills().size() / 10.0, 1) * 40;
+
+        double experience =
+                Math.min(cv.experienceYears() / 5.0, 1) * 25;
+
+        double education =
+                cv.educationCount() > 0 ? 15 : 0;
+
+        double languages =
+                Math.min(cv.languageCount() / 3.0, 1) * 10;
+
+        double certifications =
+                Math.min(cv.certifications().size() / 2.0, 1) * 10;
+
+        return skills
+                + experience
+                + education
+                + languages
+                + certifications;
     }
+
+    // --------------------------------------------------
+    // 2. Calcul du score formulaire (100 points)
+    // --------------------------------------------------
 
     private double computeFormScore(UUID profileId) {
-        CandidateProfile p = profileRepo.findByProfileId(profileId).orElse(null);
-        if (p == null) return 0;
-        int filled = 0, total = 13;
+
+        CandidateProfile p = profileRepo
+                .findByProfileId(profileId)
+                .orElse(null);
+
+        if (p == null) {
+            return 0;
+        }
+
+        int filled = 0;
+        int total = 13;
+
         if (p.getAge() != null) filled++;
         if (nb(p.getGender())) filled++;
         if (nb(p.getCountry())) filled++;
@@ -82,85 +145,232 @@ public class ScoreService {
         if (nb(p.getSector())) filled++;
         if (nb(p.getAvailability())) filled++;
         if (nb(p.getInterviewLanguage())) filled++;
-        if (p.getInterests() != null && !p.getInterests().isEmpty()) filled++;
-        if (nb(p.getTargetOfferDescription()) || nb(p.getTrainingObjective())) filled++;
+
+        if (p.getInterests() != null
+                && !p.getInterests().isEmpty()) {
+            filled++;
+        }
+
+        if (nb(p.getTargetOfferDescription())
+                || nb(p.getTrainingObjective())) {
+            filled++;
+        }
+
         if (nb(p.getCvStoragePath())) filled++;
+
         return filled * 100.0 / total;
     }
 
-    /** Dernière évaluation terminée par compétence (en %). */
-    private Map<UUID, Integer> latestAssessmentLevels(UUID profileId) {
+    // --------------------------------------------------
+    // 3. Dernières évaluations par compétence
+    // --------------------------------------------------
+
+    /**
+     * Récupère la dernière évaluation terminée
+     * pour chaque compétence.
+     *
+     * Ces résultats servent uniquement aux niveaux
+     * des compétences et aux recommandations.
+     */
+    private Map<UUID, Integer> latestAssessmentLevels(
+            UUID profileId) {
+
         Map<UUID, Assessment> latest = new HashMap<>();
-        for (Assessment a : assessmentRepo.findByProfileIdAndStatus(profileId, "COMPLETED")) {
-            if (a.getSkillId() == null || a.getScore() == null) continue;
-            latest.merge(a.getSkillId(), a, (x, y) -> time(y).isAfter(time(x)) ? y : x);
+
+        for (Assessment assessment :
+                assessmentRepo.findByProfileIdAndStatus(
+                        profileId, "COMPLETED")) {
+
+            if (assessment.getSkillId() == null
+                    || assessment.getScore() == null) {
+                continue;
+            }
+
+            latest.merge(
+                    assessment.getSkillId(),
+                    assessment,
+                    (x, y) ->
+                            time(y).isAfter(time(x)) ? y : x
+            );
         }
-        Map<UUID, Integer> out = new HashMap<>();
-        latest.forEach((k, a) -> out.put(k, (int) Math.round(percent(a))));
-        return out;
+
+        Map<UUID, Integer> result = new HashMap<>();
+
+        latest.forEach((id, assessment) ->
+                result.put(
+                        id,
+                        (int) Math.round(percent(assessment))
+                )
+        );
+
+        return result;
     }
 
-    private Instant time(Assessment a) { return a.getFinishedAt() != null ? a.getFinishedAt() : Instant.EPOCH; }
-
-    /** À ADAPTER si Assessment.score n'est pas un pourcentage. */
-    private double percent(Assessment a) {
-        double s = a.getScore();
-        return Math.max(0, Math.min(100, s <= 1.0 ? s * 100 : s));
+    private Instant time(Assessment assessment) {
+        return assessment.getFinishedAt() != null
+                ? assessment.getFinishedAt()
+                : Instant.EPOCH;
     }
 
-    /** Niveau CV (max 60) remplacé par le résultat d'évaluation quand il existe. */
-    private void rebuildSkillLevels(UUID profileId, CvSnapshotLoader.CvSnapshot cv, Map<UUID, Integer> assessed) {
+    /**
+     * Convertit le résultat en pourcentage.
+     * Exemple : 0.85 devient 85.
+     */
+    private double percent(Assessment assessment) {
+
+        double score = assessment.getScore();
+
+        return Math.max(
+                0,
+                Math.min(100, score <= 1.0 ? score * 100 : score)
+        );
+    }
+
+    // --------------------------------------------------
+    // 4. Reconstruction des niveaux des compétences
+    // --------------------------------------------------
+
+    /**
+     * Les niveaux CV sont estimés initialement.
+     * Les évaluations remplacent ces niveaux lorsqu'elles existent.
+     *
+     * Cela ne modifie pas les données originales du CV.
+     */
+    private void rebuildSkillLevels(
+            UUID profileId,
+            CvSnapshotLoader.CvSnapshot cv,
+            Map<UUID, Integer> assessed) {
+
         Map<String, Skill> byName = new HashMap<>();
-        for (Skill s : skillRepo.findAll()) {
-            if (s.getName() != null) byName.putIfAbsent(norm(s.getName()), s);
+
+        for (Skill skill : skillRepo.findAll()) {
+
+            if (skill.getName() != null) {
+                byName.putIfAbsent(
+                        norm(skill.getName()),
+                        skill
+                );
+            }
         }
 
         Map<UUID, Integer> levels = new HashMap<>();
         Map<UUID, String> sources = new HashMap<>();
 
+        // A. Compétences détectées dans le CV
         for (String name : cv.skills()) {
-            Skill sk = byName.get(norm(name));
-            if (sk == null) continue;
-            levels.put(sk.getId(), estimateFromCv(cv, name));
-            sources.put(sk.getId(), "CV");
-        }
-        assessed.forEach((id, lvl) -> { levels.put(id, lvl); sources.put(id, "ASSESSMENT"); });
 
+            Skill skill = byName.get(norm(name));
+
+            if (skill == null) {
+                continue;
+            }
+
+            levels.put(
+                    skill.getId(),
+                    estimateFromCv(cv, name)
+            );
+
+            sources.put(skill.getId(), "CV");
+        }
+
+        // B. Les évaluations remplacent les niveaux estimés
+        assessed.forEach((id, level) -> {
+            levels.put(id, level);
+            sources.put(id, "ASSESSMENT");
+        });
+
+        // C. Sauvegarder les niveaux actuels
         levelRepo.deleteByProfileId(profileId);
         levelRepo.flush();
+
         List<CandidateSkillLevel> rows = new ArrayList<>();
-        levels.forEach((skillId, lvl) -> {
-            CandidateSkillLevel l = new CandidateSkillLevel();
-            l.setProfileId(profileId);
-            l.setSkillId(skillId);
-            l.setLevelScore(lvl);
-            l.setLevelLabel(label(lvl));
-            l.setSource(sources.get(skillId));
-            rows.add(l);
+
+        levels.forEach((skillId, level) -> {
+
+            CandidateSkillLevel row =
+                    new CandidateSkillLevel();
+
+            row.setProfileId(profileId);
+            row.setSkillId(skillId);
+            row.setLevelScore(level);
+            row.setLevelLabel(label(level));
+            row.setSource(sources.get(skillId));
+
+            rows.add(row);
         });
+
         levelRepo.saveAll(rows);
     }
 
-    private int estimateFromCv(CvSnapshotLoader.CvSnapshot cv, String skill) {
-        String k = skill.toLowerCase();
+    // --------------------------------------------------
+    // 5. Estimation initiale du niveau depuis le CV
+    // --------------------------------------------------
+
+    private int estimateFromCv(
+            CvSnapshotLoader.CvSnapshot cv,
+            String skill) {
+
+        String key = skill.toLowerCase(Locale.ROOT);
+
         int level = 25;
-        long inExp = cv.experienceTexts().stream().filter(t -> t.toLowerCase().contains(k)).count();
-        level += (int) Math.min(inExp * 10, 20);
-        if (cv.certifications().stream().anyMatch(c -> c.toLowerCase().contains(k))) level += 10;
-        if (cv.experienceYears() >= 3) level += 5;
+
+        long occurrences = cv.experienceTexts()
+                .stream()
+                .filter(text ->
+                        text.toLowerCase(Locale.ROOT)
+                                .contains(key)
+                )
+                .count();
+
+        level += (int) Math.min(occurrences * 10, 20);
+
+        if (cv.certifications().stream()
+                .anyMatch(certificate ->
+                        certificate.toLowerCase(Locale.ROOT)
+                                .contains(key))) {
+            level += 10;
+        }
+
+        if (cv.experienceYears() >= 3) {
+            level += 5;
+        }
+
         return Math.min(level, 60);
     }
 
+    // --------------------------------------------------
+    // 6. Libellés des niveaux
+    // --------------------------------------------------
+
     static String label(int level) {
-        return level < 40 ? "DEBUTANT" : level < 70 ? "INTERMEDIAIRE" : "AVANCE";
+
+        return level < 40
+                ? "DEBUTANT"
+                : level < 70
+                ? "INTERMEDIAIRE"
+                : "AVANCE";
     }
 
-    static String norm(String s) {
-        String n = Normalizer.normalize(s == null ? "" : s, Normalizer.Form.NFD)
-                .replaceAll("\\p{M}", "").toLowerCase();
-        return n.replaceAll("[^a-z0-9+#]", "");
+    // --------------------------------------------------
+    // 7. Normalisation des noms
+    // --------------------------------------------------
+
+    static String norm(String value) {
+
+        String normalized = Normalizer.normalize(
+                        value == null ? "" : value,
+                        Normalizer.Form.NFD
+                ).replaceAll("\\p{M}", "")
+                .toLowerCase(Locale.ROOT);
+
+        return normalized.replaceAll("[^a-z0-9+#]", "");
     }
 
-    private static boolean nb(String s) { return s != null && !s.isBlank(); }
-    private static double round(double v) { return Math.round(v * 10) / 10.0; }
+    private static boolean nb(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static double round(double value) {
+        return Math.round(value * 10) / 10.0;
+    }
 }
