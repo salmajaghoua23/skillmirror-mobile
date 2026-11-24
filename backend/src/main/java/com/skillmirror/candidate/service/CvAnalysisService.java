@@ -8,6 +8,7 @@ import com.skillmirror.candidate.exception.CvProcessingException;
 import com.skillmirror.candidate.repository.CandidateCvRepository;
 import com.skillmirror.candidate.repository.CvAnalysisRepository;
 import com.skillmirror.common.Profile;
+import com.skillmirror.scoring.ScoreService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -24,6 +25,7 @@ public class CvAnalysisService {
     private final CvStorageService storageService;
     private final CvExtractionService extractionService;
     private final CvAiAnalysisService aiService;
+    private final ScoreService scoreService;
 
     /** Analyse du dernier CV du candidat connecté (pour le dashboard). */
     public CvAnalysisResponse latest(String uid) {
@@ -79,15 +81,23 @@ public class CvAnalysisService {
     }
 
     public CvAnalysisResponse confirm(String uid, UUID cvId) {
-        getOwnedCv(uid, cvId);
+        CandidateCv cv = getOwnedCv(uid, cvId);
+
         CvAnalysis a = analysisRepository.findByCvId(cvId)
                 .orElseThrow(() -> new CvProcessingException("Aucune analyse à confirmer."));
+
         if (a.getData() == null || "FAILED".equals(a.getStatus())) {
             throw new CvProcessingException("Impossible de confirmer : l'extraction a échoué.");
         }
+
         a.setStatus("CONFIRMED");
         a.setConfirmedAt(Instant.now());
-        return toResponse(analysisRepository.save(a));
+
+        CvAnalysis saved = analysisRepository.save(a);
+
+        scoreService.recompute(cv.getProfileId(), "INITIAL");
+
+        return toResponse(saved);
     }
 
     private CandidateCv getOwnedCv(String uid, UUID cvId) {

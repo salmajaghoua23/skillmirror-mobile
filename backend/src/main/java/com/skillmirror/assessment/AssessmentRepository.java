@@ -7,4 +7,5 @@ import java.util.UUID;
 
 public interface AssessmentRepository extends JpaRepository<Assessment, UUID> {
     List<Assessment> findByProfileIdOrderByCreatedAtDesc(UUID profileId);
+    List<Assessment> findByProfileIdAndStatus(UUID profileId, String status);
 }

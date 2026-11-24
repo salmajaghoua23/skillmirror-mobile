@@ -7,6 +7,7 @@ import com.skillmirror.candidate.service.CandidateAccess;
 import com.skillmirror.common.Profile;
 import com.skillmirror.skills.Skill;
 import com.skillmirror.skills.SkillRepository;
+import com.skillmirror.scoring.ScoreService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -33,6 +34,7 @@ public class AssessmentService {
     private final AssessmentRepository assessments;
     private final QuestionGenerator generator;
     private final AssessmentStore store;
+    private final ScoreService scoreService;
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -142,6 +144,9 @@ public class AssessmentService {
         List<String> strengths = passed ? List.of(skillName) : List.of();
         List<String> weaknesses = passed ? List.of() : List.of(skillName);
         store.saveResult(a.getId(), score, json(details), json(strengths), json(weaknesses));
+
+        // Recalculer les compétences et le score du candidat après l'évaluation
+        scoreService.recompute(a.getProfileId(), "ASSESSMENT");
 
         // Le niveau du candidat dans candidate_skills ne fait que monter
         if (passed && a.getSkillId() != null) {

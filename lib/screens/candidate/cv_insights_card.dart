@@ -146,14 +146,14 @@ class _CvInsightsCardState extends State<CvInsightsCard> {
               ),
             ]),
           ),
-        ] else if (summary.isNotEmpty) ...[
+        ] /*else if (summary.isNotEmpty) ...[
           const SizedBox(height: 14),
           Text(summary,
               style: Theme.of(context)
                   .textTheme
                   .bodyMedium
                   ?.copyWith(color: cs.onSurfaceVariant, height: 1.4)),
-        ],
+        ]*/,
 
         const SizedBox(height: 18),
         // Statistiques

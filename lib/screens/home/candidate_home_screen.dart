@@ -5,6 +5,8 @@ import '../candidate/profile_screen.dart';
 import '../candidate/cv_screen.dart';
 import '../candidate/cv_insights_card.dart';
 import '../assessment/assessment_home_screen.dart';
+import '../candidate/dashboard_score_screen.dart';
+import '../../services/profile_service.dart';
 class CandidateHomeScreen extends StatefulWidget {
   const CandidateHomeScreen({super.key});
 
@@ -18,6 +20,13 @@ class _CandidateHomeScreenState extends State<CandidateHomeScreen> {
   Future<void> _open(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
     if (mounted) setState(() => _refresh++);
+  }
+  Future<void> _openScore() async {
+    final profileId = await ProfileService().profileId();
+
+    if (!mounted) return;
+
+    await _open(DashboardScoreScreen(profileId: profileId));
   }
 
   @override
@@ -58,6 +67,19 @@ class _CandidateHomeScreenState extends State<CandidateHomeScreen> {
                   ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
           const SizedBox(height: 20),
           CvInsightsCard(key: ValueKey(_refresh)),
+          const SizedBox(height: 14),
+
+          OutlinedButton.icon(
+            icon: const Icon(Icons.analytics_outlined),
+            label: const Text('Mon score et mes compétences'),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: _openScore,
+          ),
           const SizedBox(height: 14),
           OutlinedButton.icon(
             icon: const Icon(Icons.description_outlined),
