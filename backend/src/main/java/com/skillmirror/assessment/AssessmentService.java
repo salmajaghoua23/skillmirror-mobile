@@ -1,5 +1,7 @@
 package com.skillmirror.assessment;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skillmirror.assessment.AssessmentDtos.*;
 import com.skillmirror.candidate.service.CandidateAccess;
 import com.skillmirror.common.Profile;
@@ -10,21 +12,33 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/** Création des évaluations par compétence et par niveau. */
+/** Évaluations par compétence : création (3B), correction, résultats et historique (3C). */
 @Service
 @RequiredArgsConstructor
 public class AssessmentService {
 
     private static final int DEFAULT_COUNT = 5;
+    /** Score minimum (en %) pour valider un niveau. */
+    private static final double PASS_SCORE = 70.0;
+    private static final Map<String, Integer> LEVEL_RANK =
+            Map.of("BEGINNER", 1, "INTERMEDIATE", 2, "ADVANCED", 3);
 
     private final CandidateAccess access;
     private final SkillRepository skills;
     private final QuestionRepository questions;
     private final AssessmentRepository assessments;
     private final QuestionGenerator generator;
+    private final AssessmentStore store;
+
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    // ------------------------------------------------------------------
+    // 3B : création des évaluations
+    // ------------------------------------------------------------------
 
     /** Compétences pour lesquelles au moins une question existe. */
     public List<AvailableSkill> available(String uid) {
@@ -87,8 +101,122 @@ public class AssessmentService {
                 r.questions().stream().map(Question::getQuestionText).toList());
     }
 
+    // ------------------------------------------------------------------
+    // 3C : correction automatique et calcul du résultat
+    // ------------------------------------------------------------------
+
+    public ResultResponse submit(String uid, UUID assessmentId, SubmitRequest req) {
+        Profile me = access.candidate(uid);
+        Assessment a = ownedAssessment(me, assessmentId);
+        if (!"IN_PROGRESS".equals(a.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Ce test est déjà terminé");
+        }
+
+        List<UUID> ids = Arrays.stream(a.getQuestionIds().split(","))
+                .map(String::trim).filter(s -> !s.isEmpty()).map(UUID::fromString).toList();
+        Map<UUID, Question> byId = new HashMap<>();
+        questions.findAllById(ids).forEach(q -> byId.put(q.getId(), q));
+
+        Map<UUID, Integer> given = new HashMap<>();
+        for (AnswerIn x : req.answers()) given.put(x.questionId(), x.selectedIndex());
+
+        // Correction : comparaison avec la bonne réponse, dans l'ordre du test
+        List<ResultQuestion> details = new ArrayList<>();
+        int correct = 0;
+        for (UUID id : ids) {
+            Question q = byId.get(id);
+            if (q == null) continue;
+            Integer selected = given.get(id);
+            boolean ok = selected != null && selected.equals(q.getCorrectIndex());
+            if (ok) correct++;
+            details.add(new ResultQuestion(id, q.getQuestionText(), q.options(),
+                    selected, q.getCorrectIndex(), ok, q.getExplanation()));
+        }
+
+        int total = details.size();
+        double score = total == 0 ? 0 : Math.round(1000.0 * correct / total) / 10.0;
+        boolean passed = score >= PASS_SCORE;
+        String skillName = skills.findById(a.getSkillId()).map(Skill::getName).orElse("");
+
+        // Points forts / à améliorer (lus plus tard par le calcul du score global)
+        List<String> strengths = passed ? List.of(skillName) : List.of();
+        List<String> weaknesses = passed ? List.of() : List.of(skillName);
+        store.saveResult(a.getId(), score, json(details), json(strengths), json(weaknesses));
+
+        // Le niveau du candidat dans candidate_skills ne fait que monter
+        if (passed && a.getSkillId() != null) {
+            String current = store.currentLevel(me.getId(), a.getSkillId());
+            if (rank(a.getLevel()) > rank(current)) {
+                store.saveSkillLevel(me.getId(), a.getSkillId(), a.getLevel());
+            }
+        }
+        return new ResultResponse(a.getId(), skillName, a.getLevel(), score, correct, total,
+                passed, "COMPLETED", Instant.now(), details);
+    }
+
+    /** Résultat détaillé d'un test terminé (correction et explications). */
+    public ResultResponse result(String uid, UUID assessmentId) {
+        Profile me = access.candidate(uid);
+        Assessment a = ownedAssessment(me, assessmentId);
+        if (!"COMPLETED".equals(a.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Ce test n'est pas terminé");
+        }
+        String stored = store.loadResults(a.getId()).orElse("[]");
+        List<ResultQuestion> details;
+        try {
+            details = mapper.readValue(stored, new TypeReference<List<ResultQuestion>>() {});
+        } catch (Exception e) {
+            details = List.of();
+        }
+        int correct = (int) details.stream().filter(ResultQuestion::correct).count();
+        double score = a.getScore() == null ? 0 : a.getScore();
+        String skillName = a.getSkillId() == null ? ""
+                : skills.findById(a.getSkillId()).map(Skill::getName).orElse("");
+        return new ResultResponse(a.getId(), skillName, a.getLevel(), score, correct, details.size(),
+                score >= PASS_SCORE, a.getStatus(), a.getFinishedAt(), details);
+    }
+
+    // ------------------------------------------------------------------
+    // 3C : historique des tests
+    // ------------------------------------------------------------------
+
+    public List<HistoryItem> history(String uid) {
+        Profile me = access.candidate(uid);
+        List<Assessment> list = assessments.findByProfileIdOrderByCreatedAtDesc(me.getId());
+        Map<UUID, String> names = new HashMap<>();
+        skills.findAllById(list.stream().map(Assessment::getSkillId)
+                        .filter(Objects::nonNull).collect(Collectors.toSet()))
+                .forEach(s -> names.put(s.getId(), s.getName()));
+
+        return list.stream()
+                .map(a -> new HistoryItem(a.getId(), a.getSkillId(),
+                        names.getOrDefault(a.getSkillId(), "—"), a.getLevel(), a.getStatus(),
+                        a.getScore(), a.getTotalQuestions(), a.getCreatedAt(), a.getFinishedAt()))
+                .toList();
+    }
+
+    // ------------------------------------------------------------------
+
+    private Assessment ownedAssessment(Profile me, UUID id) {
+        return assessments.findById(id)
+                .filter(a -> me.getId().equals(a.getProfileId()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Test introuvable"));
+    }
+
     private Skill skill(UUID id) {
         return skills.findById(id).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.NOT_FOUND, "Compétence introuvable"));
+    }
+
+    private static int rank(String level) {
+        return level == null ? 0 : LEVEL_RANK.getOrDefault(level, 0);
+    }
+
+    private String json(Object o) {
+        try {
+            return mapper.writeValueAsString(o);
+        } catch (Exception e) {
+            throw new IllegalStateException("JSON invalide", e);
+        }
     }
 }

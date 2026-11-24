@@ -33,7 +33,7 @@ public final class OfferDtos {
             @Size(max = 100) String salaryRange,
             @Pattern(regexp = "^(DRAFT|PUBLISHED|CLOSED)?$", message = "Statut invalide")
             String status,
-            @Valid List<SkillInput> skills) {}
+            List<@Valid SkillInput> skills ){}
 
     public record OfferStatusRequest(
             @NotBlank @Pattern(regexp = "DRAFT|PUBLISHED|CLOSED", message = "Statut invalide")

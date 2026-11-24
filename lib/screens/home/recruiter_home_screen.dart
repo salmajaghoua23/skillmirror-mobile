@@ -21,8 +21,9 @@ class RecruiterHomeScreen extends StatefulWidget {
 class _RecruiterHomeScreenState extends State<RecruiterHomeScreen> {
   late Future<RecruiterDashboard> _future = RecruiterOfferService().dashboard();
 
-  void _reload() => setState(() => _future = RecruiterOfferService().dashboard());
-
+  void _reload() => setState(() {
+    _future = RecruiterOfferService().dashboard();
+  });
   Future<void> _open(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
     if (mounted) _reload();

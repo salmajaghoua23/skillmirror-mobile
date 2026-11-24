@@ -18,8 +18,9 @@ class _OffersScreenState extends State<OffersScreen> {
   String? _filter; // null = toutes
   late Future<List<JobOffer>> _future = RecruiterOfferService().offers();
 
-  void _reload() =>
-      setState(() => _future = RecruiterOfferService().offers(status: _filter));
+  void _reload() => setState(() {
+    _future = RecruiterOfferService().offers(status: _filter);
+  });
 
   Future<void> _open(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));

@@ -8,6 +8,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/assessments")
@@ -33,5 +34,24 @@ public class AssessmentController {
     @PostMapping("/generate")
     public GenerateResponse generate(Authentication auth, @Valid @RequestBody StartRequest req) {
         return service.generate(auth.getName(), req.skillId(), req.level(), req.count());
+    }
+
+    /** Envoie les réponses : correction automatique et score. */
+    @PostMapping("/{id}/submit")
+    public ResultResponse submit(Authentication auth, @PathVariable UUID id,
+                                 @Valid @RequestBody SubmitRequest req) {
+        return service.submit(auth.getName(), id, req);
+    }
+
+    /** Résultat détaillé (correction et explications) d'un test terminé. */
+    @GetMapping("/{id}/result")
+    public ResultResponse result(Authentication auth, @PathVariable UUID id) {
+        return service.result(auth.getName(), id);
+    }
+
+    /** Historique des tests du candidat. */
+    @GetMapping("/history")
+    public List<HistoryItem> history(Authentication auth) {
+        return service.history(auth.getName());
     }
 }

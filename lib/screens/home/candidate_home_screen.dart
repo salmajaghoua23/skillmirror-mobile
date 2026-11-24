@@ -4,7 +4,7 @@ import '../settings_screen.dart';
 import '../candidate/profile_screen.dart';
 import '../candidate/cv_screen.dart';
 import '../candidate/cv_insights_card.dart';
-
+import '../assessment/assessment_home_screen.dart';
 class CandidateHomeScreen extends StatefulWidget {
   const CandidateHomeScreen({super.key});
 
@@ -67,6 +67,16 @@ class _CandidateHomeScreenState extends State<CandidateHomeScreen> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
             onPressed: () => _open(const CvScreen()),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.quiz_outlined),
+            label: const Text('Tests de compétences'),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () => _open(const AssessmentHomeScreen()),
           ),
         ],
       ),
