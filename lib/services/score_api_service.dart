@@ -28,7 +28,7 @@ class ScoreApiService {
   // Charger le Dashboard sans relancer Ollama
   Future<DashboardDto> getDashboard(String profileId) async {
     final r = await http.get(
-      Uri.parse('$baseUrl/api/score/$profileId/dashboard'),
+      Uri.parse('$baseUrl/score/$profileId/dashboard'),
       headers: await _h,
     );
 
@@ -44,7 +44,7 @@ class ScoreApiService {
   // Demander une nouvelle analyse Ollama
   Future<void> refresh(String profileId) async {
     final r = await http.post(
-      Uri.parse('$baseUrl/api/score/$profileId/refresh'),
+      Uri.parse('$baseUrl/score/$profileId/refresh'),
       headers: await _h,
     );
 

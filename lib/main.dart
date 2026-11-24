@@ -7,7 +7,7 @@ import 'package:skill_mirror/core/theme_controller.dart';
 import 'package:skill_mirror/screens/auth_gate.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
-
+import 'package:skill_mirror/config/api_config.dart';
 import 'providers/score_provider.dart';
 import 'services/score_api_service.dart';
 
@@ -52,7 +52,7 @@ class MyApp extends StatelessWidget {
           ChangeNotifierProvider(
             create: (_) => ScoreProvider(
               ScoreApiService(
-                'http://10.0.2.2:8080',
+                ApiConfig.baseUrl,
                     () async {
                   final user = FirebaseAuth.instance.currentUser;
 
