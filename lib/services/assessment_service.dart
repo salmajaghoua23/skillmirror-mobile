@@ -23,14 +23,15 @@ class AssessmentService {
       String assessmentId,
       Map<String, int> answers,
       List<QuizQuestion> questions,
-      ) async => AssessmentResult.fromJson(
-    await _api.post('/assessments/$assessmentId/submit', {
-      'answers': [
-        for (final q in questions)
-          {'questionId': q.id, 'selectedIndex': answers[q.id]},
-      ],
-    }),
-  );
+      ) async =>
+      AssessmentResult.fromJson(
+        await _api.post('/assessments/$assessmentId/submit', {
+          'answers': [
+            for (final q in questions)
+              {'questionId': q.id, 'selectedIndex': answers[q.id]},
+          ],
+        }),
+      );
 
   Future<AssessmentResult> result(String assessmentId) async =>
       AssessmentResult.fromJson(
@@ -41,4 +42,21 @@ class AssessmentService {
       (await _api.get('/assessments/history') as List)
           .map((e) => HistoryItem.fromJson(e as Map<String, dynamic>))
           .toList();
+
+  /// Sauvegarde en cours de liste (reprise possible).
+  Future<void> saveProgress(
+      String assessmentId, Map<String, int> answers, int index) async {
+    await _api.post('/assessments/$assessmentId/progress', {
+      'answers': answers,
+      'index': index,
+    });
+  }
+
+  /// Refaire le niveau après un échec.
+  Future<void> restart(String skillId, String level) async {
+    await _api.post('/assessments/restart', {
+      'skillId': skillId,
+      'level': level,
+    });
+  }
 }

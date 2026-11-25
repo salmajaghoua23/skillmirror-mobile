@@ -55,6 +55,9 @@ class _AssessmentHomeScreenState extends State<AssessmentHomeScreen> {
       final next = await Navigator.of(context).push<NextTest>(
         MaterialPageRoute(builder: (_) => ResultScreen(assessmentId: assessmentId)),
       );
+      if (next != null && next.restart) {
+        await _svc.restart(next.skillId, next.level);   // remet le niveau à zéro
+      }
       if (!mounted) return;
       _reload();
       skill = next?.skillId;
@@ -243,6 +246,7 @@ class _AssessmentHomeScreenState extends State<AssessmentHomeScreen> {
 
   Widget _levelChip(AvailableSkill s, LevelStatus l) {
     final label = AssessmentLabels.levels[l.level] ?? l.level;
+
     IconData icon;
     Color color;
     if (l.locked) {
@@ -258,7 +262,9 @@ class _AssessmentHomeScreenState extends State<AssessmentHomeScreen> {
       icon = Icons.play_circle_outline;
       color = Theme.of(context).colorScheme.primary;
     }
-    final suffix = l.bestScore != null ? ' · ${l.bestScore!.toStringAsFixed(0)} %' : '';
+    final suffix = l.passed
+        ? ' · ✓ ${l.bestScore?.toStringAsFixed(0)} %'
+        : (l.listsDone > 0 ? ' · ${l.listsDone}/${l.nbLists}' : '');
     return ActionChip(
       avatar: Icon(icon, size: 18, color: color),
       label: Text('$label$suffix'),

@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
@@ -24,180 +25,187 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Évaluations par compétence.
- *  - 3 niveaux : le suivant est verrouillé tant que le précédent n'est pas réussi (>= 60 %) ;
- *  - 5 listes de questions par niveau (au moins 10 questions par liste) ;
- *  - tests proposés d'abord selon le profil (compétences du CV).
+ * Parcours par niveau (principe Duolingo) :
+ *  - un niveau = 5 listes à terminer dans l'ordre (1 test = 1 liste) ;
+ *  - l'état est sauvegardé (liste courante, cumul, réponses en cours) ;
+ *  - le niveau suivant se débloque seulement après la 5e liste ET si le score cumulé >= 60 %.
+ *  - le RAG ne génère que ce qui manque dans la base.
  */
 @Service
 @RequiredArgsConstructor
 public class AssessmentService {
 
-    /** Score minimum (en %) pour réussir un niveau et débloquer le suivant. */
     private static final double PASS_SCORE = 60.0;
+    private static final int NB_LISTS = QuestionGenerator.LISTS_PER_LEVEL;
     private static final List<String> LEVELS = List.of("BEGINNER", "INTERMEDIATE", "ADVANCED");
     private static final Map<String, Integer> LEVEL_RANK =
             Map.of("BEGINNER", 1, "INTERMEDIATE", 2, "ADVANCED", 3);
-
-    /** Si aucune liste n'est complète : taille de l'échantillon tiré dans la banque. */
-    private static final int FALLBACK_SIZE = 10;
-    /** Une liste très longue est limitée à ce nombre de questions. */
-    private static final int MAX_LIST_SIZE = 20;
 
     private final CandidateAccess access;
     private final SkillRepository skills;
     private final QuestionRepository questions;
     private final AssessmentRepository assessments;
+    private final LevelProgressRepository progresses;
     private final QuestionGenerator generator;
     private final AssessmentStore store;
     private final CandidateCvRepository cvs;
     private final CvAnalysisRepository analyses;
+    private final KnowledgeStore knowledge;
 
-    /** Mettre assessments.auto-fill=false (variable ASSESSMENTS_AUTO_FILL) pour couper le remplissage IA. */
     @Value("${assessments.auto-fill:true}")
     private boolean autoFill;
 
+    /** Taille minimale d'une liste (10 en production ; baissez-la temporairement pour une démo). */
+    @Value("${assessments.min-list-size:10}")
+    private int minListSize;
+
     private final ObjectMapper mapper = new ObjectMapper();
-    private final Random random = new Random();
 
     // ------------------------------------------------------------------
-    // Tests proposés (selon le profil) avec niveaux verrouillés
+    // Liste des tests avec état de chaque niveau
     // ------------------------------------------------------------------
 
     public List<AvailableSkill> available(String uid) {
         Profile me = access.candidate(uid);
 
+        // UNE seule requête : nombre de questions par compétence et par niveau
         Map<UUID, Map<String, Long>> counts = new HashMap<>();
         for (Object[] row : questions.countBySkillAndLevel()) {
             counts.computeIfAbsent((UUID) row[0], k -> new HashMap<>())
                     .put((String) row[1], (Long) row[2]);
         }
+
         Set<String> mine = profileSkills(me.getId());
-        Map<String, Double> best = bestScores(assessments.findByProfileIdOrderByCreatedAtDesc(me.getId()));
+        Map<String, LevelProgress> prog = progressMap(me.getId());
 
         List<AvailableSkill> out = new ArrayList<>();
-        for (Skill s : skills.findAllById(counts.keySet())) {
-            Map<String, Long> perLevel = counts.get(s.getId());
+        for (Skill s : skills.findAll()) {
+            boolean inProfile = mine.contains(SkillMatcher.normalize(s.getName()));
+            boolean hasQuestions = counts.containsKey(s.getId());
+
+            if (!hasQuestions) {
+                if (!inProfile) continue;   // ni questions, ni dans le profil : on ignore
+                // compétence du profil sans question : visible seulement si un cours existe pour le RAG
+                if (knowledge.firstChunks(s.getId(), 1).isEmpty()) continue;
+            }
+
+            Map<String, Long> perLevel = counts.getOrDefault(s.getId(), Map.of());
             List<LevelStatus> levels = new ArrayList<>();
             for (String level : LEVELS) {
+                LevelProgress p = prog.get(key(s.getId(), level));
                 int qc = perLevel.getOrDefault(level, 0L).intValue();
-                Double b = best.get(s.getId() + ":" + level);
-                levels.add(new LevelStatus(level, !isUnlocked(best, s.getId(), level),
-                        qc > 0, b, b != null && b >= PASS_SCORE, qc));
+                boolean passed = p != null && "PASSED".equals(p.getStatus());
+                int done = p == null ? 0 : (passed || "FAILED".equals(p.getStatus())
+                        ? NB_LISTS : p.getNextList() - 1);
+                levels.add(new LevelStatus(level, !isUnlocked(prog, s.getId(), level), true,
+                        p == null || p.getQuestionTotal() == 0 ? null : p.score(),
+                        passed, qc, p == null ? "IN_PROGRESS" : p.getStatus(), done, NB_LISTS));
             }
-            out.add(new AvailableSkill(s.getId(), s.getName(), s.getCategory(),
-                    mine.contains(SkillMatcher.normalize(s.getName())), levels));
+            out.add(new AvailableSkill(s.getId(), s.getName(), s.getCategory(), inProfile, levels));
         }
         out.sort(Comparator.comparing(AvailableSkill::recommended).reversed()
                 .thenComparing(AvailableSkill::name, String.CASE_INSENSITIVE_ORDER));
         return out;
     }
-
     // ------------------------------------------------------------------
-    // Démarrer un test
+    // Démarrer ou reprendre la liste courante du niveau
     // ------------------------------------------------------------------
 
+    @Transactional
     public StartResponse start(String uid, UUID skillId, String level, Integer ignored) {
         Profile me = access.candidate(uid);
         Skill skill = skill(skillId);
-        List<Assessment> history = assessments.findByProfileIdOrderByCreatedAtDesc(me.getId());
+        Map<String, LevelProgress> prog = progressMap(me.getId());
 
-        // Niveau verrouillé : vérifié côté serveur (on ne se fie pas à l'application)
-        if (!isUnlocked(bestScores(history), skillId, level)) {
+        if (!isUnlocked(prog, skillId, level)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Niveau verrouillé : obtenez au moins " + (int) PASS_SCORE
-                            + " % au niveau précédent pour le débloquer");
+                    "Niveau verrouillé : terminez les 5 listes du niveau précédent avec au moins "
+                            + (int) PASS_SCORE + " % de score global");
         }
-
-        List<Question> all = new ArrayList<>(questions.findBySkillIdAndLevel(skillId, level));
-        if (all.isEmpty()) {
-            // Aucune question : on génère maintenant avec l'IA (le candidat attend)
-            all.addAll(generator.generate(skill, level, 3).questions());
+        LevelProgress p = progress(me.getId(), skillId, level);
+        if ("PASSED".equals(p.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Niveau déjà validé");
         }
-        if (all.isEmpty()) {
+        if ("FAILED".equals(p.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Aucune question disponible pour cette compétence à ce niveau");
+                    "Score global insuffisant : refaites le niveau ou allez au tableau de bord");
         }
 
-        Picked picked = pick(all, history, skillId, level);
+        int listNo = p.getNextList();
 
-        // Les listes incomplètes se remplissent en arrière-plan avec le RAG
-        if (autoFill && !generator.isComplete(skillId, level)) {
-            generator.fillAsync(skill, level);
+        // 1) Reprise : un test de cette liste est déjà commencé
+        Optional<Assessment> open = assessments
+                .findByProfileIdOrderByCreatedAtDesc(me.getId()).stream()
+                .filter(a -> "IN_PROGRESS".equals(a.getStatus())
+                        && skillId.equals(a.getSkillId()) && level.equals(a.getLevel())
+                        && Objects.equals(a.getListNo(), listNo))
+                .findFirst();
+        if (open.isPresent()) {
+            Assessment a = open.get();
+            return response(a, skill, p, orderedQuestions(a), readDraft(a));
         }
+
+        // 2) Nouvelle liste : on utilise celle de la base si elle est assez remplie
+        List<Question> levelQuestions = questions.findBySkillIdAndLevel(skillId, level);
+        List<Question> list = levelQuestions.stream()
+                .filter(q -> (q.getListNo() == null ? 1 : q.getListNo()) == listNo)
+                .collect(Collectors.toCollection(ArrayList::new));
+
+        if (list.size() < minListSize) {
+            // Il manque des questions : le RAG intervient, et seulement pour ce qui manque
+            if (autoFill) {
+                if (levelQuestions.isEmpty()) {
+                    generator.fillAsync(skill, level);                          // niveau vide : toutes les listes
+                } else {
+                    generator.fillListAsync(skill, level, listNo, minListSize); // seulement cette liste
+                }
+            }
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "La liste " + listNo + " est en cours de génération par l'IA ("
+                            + list.size() + "/" + minListSize + "). Réessayez dans quelques minutes.");
+        }
+        Collections.shuffle(list);
 
         Assessment a = new Assessment();
         a.setProfileId(me.getId());
         a.setSkillId(skillId);
         a.setLevel(level);
-        a.setListNo(picked.listNo());
+        a.setListNo(listNo);
         a.setStatus("IN_PROGRESS");
-        a.setTotalQuestions(picked.questions().size());
-        a.setQuestionIds(picked.questions().stream().map(q -> q.getId().toString())
-                .collect(Collectors.joining(",")));
+        a.setTotalQuestions(list.size());
+        a.setQuestionIds(list.stream().map(q -> q.getId().toString()).collect(Collectors.joining(",")));
+        a.setCurrentIndex(0);
         assessments.save(a);
-
-        List<QuestionOut> out = picked.questions().stream()
-                .map(q -> new QuestionOut(q.getId(), q.getQuestionText(), q.options()))
-                .toList();
-        return new StartResponse(a.getId(), skill.getName(), level, out);
+        return response(a, skill, p, list, Map.of());
     }
 
-    private record Picked(List<Question> questions, Integer listNo) {}
-
-    /**
-     * Choisit les questions : une liste complète (au moins 10 questions), différente de la
-     * dernière passée par le candidat si possible. Sans liste complète, un échantillon de la banque.
-     */
-    private Picked pick(List<Question> all, List<Assessment> history, UUID skillId, String level) {
-        Map<Integer, List<Question>> byList = all.stream().collect(
-                Collectors.groupingBy(q -> q.getListNo() == null ? 1 : q.getListNo()));
-
-        List<Integer> complete = byList.entrySet().stream()
-                .filter(e -> e.getValue().size() >= QuestionGenerator.MIN_LIST_SIZE)
-                .map(Map.Entry::getKey).sorted().collect(Collectors.toList());
-
-        List<Question> chosen;
-        Integer listNo = null;
-        if (!complete.isEmpty()) {
-            Integer last = lastListNo(history, skillId, level);
-            List<Integer> options = complete.stream()
-                    .filter(n -> !Objects.equals(n, last)).collect(Collectors.toList());
-            if (options.isEmpty()) options = complete;
-            listNo = options.get(random.nextInt(options.size()));
-            chosen = new ArrayList<>(byList.get(listNo));
-            Collections.shuffle(chosen);
-            if (chosen.size() > MAX_LIST_SIZE) chosen = new ArrayList<>(chosen.subList(0, MAX_LIST_SIZE));
-        } else {
-            chosen = new ArrayList<>(all);
-            Collections.shuffle(chosen);
-            if (chosen.size() > FALLBACK_SIZE) chosen = new ArrayList<>(chosen.subList(0, FALLBACK_SIZE));
-        }
-        return new Picked(chosen, listNo);
-    }
-
-    private static Integer lastListNo(List<Assessment> history, UUID skillId, String level) {
-        for (Assessment a : history) {   // du plus récent au plus ancien
-            if (skillId.equals(a.getSkillId()) && level.equals(a.getLevel()) && a.getListNo() != null) {
-                return a.getListNo();
-            }
-        }
-        return null;
-    }
-
-    /** Génération manuelle avec le RAG (utile pour tester / enrichir la banque). */
-    public GenerateResponse generate(String uid, UUID skillId, String level, Integer requested) {
-        access.candidate(uid);
-        Skill skill = skill(skillId);
-        QuestionGenerator.Result r = generator.generate(skill, level, requested == null ? 3 : requested);
-        return new GenerateResponse(r.questions().size(), r.passagesUsed(),
-                r.questions().stream().map(Question::getQuestionText).toList());
+    private StartResponse response(Assessment a, Skill skill, LevelProgress p,
+                                   List<Question> qs, Map<UUID, Integer> saved) {
+        List<QuestionOut> out = qs.stream()
+                .map(q -> new QuestionOut(q.getId(), q.getQuestionText(), q.options())).toList();
+        return new StartResponse(a.getId(), skill.getName(), a.getLevel(), p.getNextList(),
+                p.getNextList() - 1, NB_LISTS,
+                a.getCurrentIndex() == null ? 0 : a.getCurrentIndex(), saved, out);
     }
 
     // ------------------------------------------------------------------
-    // Correction automatique et calcul du résultat
+    // Sauvegarde en cours de liste (le candidat peut quitter et reprendre)
     // ------------------------------------------------------------------
 
+    public void saveDraft(String uid, UUID assessmentId, SaveRequest req) {
+        Profile me = access.candidate(uid);
+        Assessment a = ownedAssessment(me, assessmentId);
+        if (!"IN_PROGRESS".equals(a.getStatus())) return;
+        a.setDraftAnswers(json(req.answers()));
+        a.setCurrentIndex(req.index());
+        assessments.save(a);
+    }
+
+    // ------------------------------------------------------------------
+    // Terminer une liste : cumul, puis évaluation du niveau après la 5e
+    // ------------------------------------------------------------------
+
+    @Transactional
     public ResultResponse submit(String uid, UUID assessmentId, SubmitRequest req) {
         Profile me = access.candidate(uid);
         Assessment a = ownedAssessment(me, assessmentId);
@@ -205,11 +213,9 @@ public class AssessmentService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Ce test est déjà terminé");
         }
 
-        List<UUID> ids = Arrays.stream(a.getQuestionIds().split(","))
-                .map(String::trim).filter(s -> !s.isEmpty()).map(UUID::fromString).toList();
+        List<UUID> ids = idsOf(a);
         Map<UUID, Question> byId = new HashMap<>();
         questions.findAllById(ids).forEach(q -> byId.put(q.getId(), q));
-
         Map<UUID, Integer> given = new HashMap<>();
         for (AnswerIn x : req.answers()) given.put(x.questionId(), x.selectedIndex());
 
@@ -224,24 +230,28 @@ public class AssessmentService {
             details.add(new ResultQuestion(id, q.getQuestionText(), q.options(),
                     selected, q.getCorrectIndex(), ok, q.getExplanation()));
         }
-
         int total = details.size();
         double score = total == 0 ? 0 : Math.round(1000.0 * correct / total) / 10.0;
-        boolean passed = score >= PASS_SCORE;
         String skillName = skills.findById(a.getSkillId()).map(Skill::getName).orElse("");
 
-        List<String> strengths = passed ? List.of(skillName) : List.of();
-        List<String> weaknesses = passed ? List.of() : List.of(skillName);
-        store.saveResult(a.getId(), score, json(details), json(strengths), json(weaknesses));
+        store.saveResult(a.getId(), score, json(details),
+                json(score >= PASS_SCORE ? List.of(skillName) : List.of()),
+                json(score >= PASS_SCORE ? List.of() : List.of(skillName)));
 
-        // Le niveau du candidat dans candidate_skills ne fait que monter
-        if (passed && a.getSkillId() != null) {
-            String current = store.currentLevel(me.getId(), a.getSkillId());
-            if (rank(a.getLevel()) > rank(current)) {
-                store.saveSkillLevel(me.getId(), a.getSkillId(), a.getLevel());
+        // --- cumul sur le niveau ---
+        LevelProgress p = progress(me.getId(), a.getSkillId(), a.getLevel());
+        if ("IN_PROGRESS".equals(p.getStatus()) && Objects.equals(a.getListNo(), p.getNextList())) {
+            p.setCorrectTotal(p.getCorrectTotal() + correct);
+            p.setQuestionTotal(p.getQuestionTotal() + total);
+            p.setNextList(p.getNextList() + 1);
+            if (p.getNextList() > NB_LISTS) {                         // 5e liste terminée
+                p.setStatus(p.score() >= PASS_SCORE ? "PASSED" : "FAILED");
+                if ("PASSED".equals(p.getStatus())) raiseSkillLevel(me.getId(), a);
             }
+            p.setUpdatedAt(Instant.now());
+            progresses.save(p);
         }
-        return toResult(a, skillName, score, correct, total, Instant.now(), details);
+        return toResult(a, skillName, score, correct, total, Instant.now(), details, p);
     }
 
     public ResultResponse result(String uid, UUID assessmentId) {
@@ -250,32 +260,66 @@ public class AssessmentService {
         if (!"COMPLETED".equals(a.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Ce test n'est pas terminé");
         }
-        String stored = store.loadResults(a.getId()).orElse("[]");
         List<ResultQuestion> details;
         try {
-            details = mapper.readValue(stored, new TypeReference<List<ResultQuestion>>() {});
+            details = mapper.readValue(store.loadResults(a.getId()).orElse("[]"),
+                    new TypeReference<List<ResultQuestion>>() {});
         } catch (Exception e) {
             details = List.of();
         }
         int correct = (int) details.stream().filter(ResultQuestion::correct).count();
-        double score = a.getScore() == null ? 0 : a.getScore();
         String skillName = a.getSkillId() == null ? ""
                 : skills.findById(a.getSkillId()).map(Skill::getName).orElse("");
-        return toResult(a, skillName, score, correct, details.size(), a.getFinishedAt(), details);
+        LevelProgress p = progress(me.getId(), a.getSkillId(), a.getLevel());
+        return toResult(a, skillName, a.getScore() == null ? 0 : a.getScore(), correct,
+                details.size(), a.getFinishedAt(), details, p);
     }
 
     private ResultResponse toResult(Assessment a, String skillName, double score, int correct,
-                                    int total, Instant finishedAt, List<ResultQuestion> details) {
+                                    int total, Instant finishedAt, List<ResultQuestion> details,
+                                    LevelProgress p) {
+        boolean finished = !"IN_PROGRESS".equals(p.getStatus());
+        boolean passed = "PASSED".equals(p.getStatus());
         int idx = LEVELS.indexOf(a.getLevel());
-        String next = (idx >= 0 && idx + 1 < LEVELS.size()) ? LEVELS.get(idx + 1) : null;
-        return new ResultResponse(a.getId(), a.getSkillId(), skillName, a.getLevel(), score,
-                correct, total, score >= PASS_SCORE, PASS_SCORE, next, "COMPLETED",
-                finishedAt, details);
+        String next = (passed && idx + 1 < LEVELS.size()) ? LEVELS.get(idx + 1) : null;
+        int done = finished ? NB_LISTS : p.getNextList() - 1;
+        return new ResultResponse(a.getId(), a.getSkillId(), skillName, a.getLevel(),
+                a.getListNo() == null ? 0 : a.getListNo(), score, correct, total,
+                done, NB_LISTS, finished, passed, p.score(), PASS_SCORE,
+                next, "COMPLETED", finishedAt, details);
     }
 
     // ------------------------------------------------------------------
-    // Historique
+    // Refaire le niveau (seulement après un échec)
     // ------------------------------------------------------------------
+
+    @Transactional
+    public void restart(String uid, UUID skillId, String level) {
+        Profile me = access.candidate(uid);
+        LevelProgress p = progress(me.getId(), skillId, level);
+        if (!"FAILED".equals(p.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Le niveau n'est pas en échec");
+        }
+        p.setAttempt(p.getAttempt() + 1);
+        p.setNextList(1);
+        p.setCorrectTotal(0);
+        p.setQuestionTotal(0);
+        p.setStatus("IN_PROGRESS");
+        p.setUpdatedAt(Instant.now());
+        progresses.save(p);
+    }
+
+    // ------------------------------------------------------------------
+    // Génération manuelle + historique
+    // ------------------------------------------------------------------
+
+    public GenerateResponse generate(String uid, UUID skillId, String level, Integer requested) {
+        access.candidate(uid);
+        QuestionGenerator.Result r = generator.generate(skill(skillId), level,
+                requested == null ? 3 : requested);
+        return new GenerateResponse(r.questions().size(), r.passagesUsed(),
+                r.questions().stream().map(Question::getQuestionText).toList());
+    }
 
     public List<HistoryItem> history(String uid) {
         Profile me = access.candidate(uid);
@@ -284,7 +328,6 @@ public class AssessmentService {
         skills.findAllById(list.stream().map(Assessment::getSkillId)
                         .filter(Objects::nonNull).collect(Collectors.toSet()))
                 .forEach(s -> names.put(s.getId(), s.getName()));
-
         return list.stream()
                 .map(a -> new HistoryItem(a.getId(), a.getSkillId(),
                         names.getOrDefault(a.getSkillId(), "—"), a.getLevel(), a.getStatus(),
@@ -296,26 +339,64 @@ public class AssessmentService {
     // Outils
     // ------------------------------------------------------------------
 
-    /** Meilleur score terminé par compétence et niveau : clé "skillId:LEVEL". */
-    private static Map<String, Double> bestScores(List<Assessment> history) {
-        Map<String, Double> best = new HashMap<>();
-        for (Assessment a : history) {
-            if (!"COMPLETED".equals(a.getStatus()) || a.getScore() == null || a.getSkillId() == null) continue;
-            best.merge(a.getSkillId() + ":" + a.getLevel(), a.getScore(), Math::max);
-        }
-        return best;
+    private static String key(UUID skillId, String level) { return skillId + ":" + level; }
+
+    private Map<String, LevelProgress> progressMap(UUID profileId) {
+        return progresses.findByProfileId(profileId).stream()
+                .collect(Collectors.toMap(
+                        p -> key(p.getSkillId(), p.getLevel()),
+                        p -> p,
+                        (x, y) -> x));
     }
 
-    /** Débutant toujours ouvert ; un niveau s'ouvre quand le précédent est réussi (>= 60 %). */
-    private static boolean isUnlocked(Map<String, Double> best, UUID skillId, String level) {
+    private LevelProgress progress(UUID profileId, UUID skillId, String level) {
+        return progresses.findByProfileIdAndSkillIdAndLevel(profileId, skillId, level)
+                .orElseGet(() -> {
+                    LevelProgress p = new LevelProgress();
+                    p.setProfileId(profileId);
+                    p.setSkillId(skillId);
+                    p.setLevel(level);
+                    return progresses.save(p);
+                });
+    }
+
+    /** Débutant ouvert ; un niveau s'ouvre quand le précédent est PASSED (5 listes + score global >= 60 %). */
+    private static boolean isUnlocked(Map<String, LevelProgress> prog, UUID skillId, String level) {
         int idx = LEVELS.indexOf(level);
         if (idx < 0) return false;
         if (idx == 0) return true;
-        Double previous = best.get(skillId + ":" + LEVELS.get(idx - 1));
-        return previous != null && previous >= PASS_SCORE;
+        LevelProgress prev = prog.get(key(skillId, LEVELS.get(idx - 1)));
+        return prev != null && "PASSED".equals(prev.getStatus());
     }
 
-    /** Compétences du CV du candidat (analyse extraite ou confirmée), sans accents ni casse. */
+    private void raiseSkillLevel(UUID profileId, Assessment a) {
+        String current = store.currentLevel(profileId, a.getSkillId());
+        if (rank(a.getLevel()) > rank(current)) {
+            store.saveSkillLevel(profileId, a.getSkillId(), a.getLevel());
+        }
+    }
+
+    private List<UUID> idsOf(Assessment a) {
+        return Arrays.stream(a.getQuestionIds().split(","))
+                .map(String::trim).filter(s -> !s.isEmpty()).map(UUID::fromString).toList();
+    }
+
+    /** Questions d'un test, dans l'ordre d'origine (important pour la reprise). */
+    private List<Question> orderedQuestions(Assessment a) {
+        Map<UUID, Question> byId = new HashMap<>();
+        questions.findAllById(idsOf(a)).forEach(q -> byId.put(q.getId(), q));
+        return idsOf(a).stream().map(byId::get).filter(Objects::nonNull).toList();
+    }
+
+    private Map<UUID, Integer> readDraft(Assessment a) {
+        if (a.getDraftAnswers() == null || a.getDraftAnswers().isBlank()) return Map.of();
+        try {
+            return mapper.readValue(a.getDraftAnswers(), new TypeReference<Map<UUID, Integer>>() {});
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
     private Set<String> profileSkills(UUID profileId) {
         Set<String> out = new HashSet<>();
         try {
@@ -328,9 +409,7 @@ public class AssessmentService {
                         d.technicalSkills().forEach(s -> out.add(SkillMatcher.normalize(s)));
                         d.softSkills().forEach(s -> out.add(SkillMatcher.normalize(s)));
                     });
-        } catch (RuntimeException ignored) {
-            // pas de CV exploitable : aucune recommandation, tous les tests restent accessibles
-        }
+        } catch (RuntimeException ignored) { }
         return out;
     }
 
@@ -350,10 +429,7 @@ public class AssessmentService {
     }
 
     private String json(Object o) {
-        try {
-            return mapper.writeValueAsString(o);
-        } catch (Exception e) {
-            throw new IllegalStateException("JSON invalide", e);
-        }
+        try { return mapper.writeValueAsString(o); }
+        catch (Exception e) { throw new IllegalStateException("JSON invalide", e); }
     }
 }

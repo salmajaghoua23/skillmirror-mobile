@@ -17,7 +17,9 @@ class AssessmentLabels {
 /// Prochain test à lancer (renvoyé par l'écran de résultat).
 class NextTest {
   final String skillId, level;
-  const NextTest(this.skillId, this.level);
+  final bool restart;
+  const NextTest(this.skillId, this.level, {this.restart = false});
+
 }
 
 class LevelStatus {
@@ -25,7 +27,7 @@ class LevelStatus {
   final bool locked, hasQuestions, passed;
   final double? bestScore;
   final int questionCount;
-
+  final String status; final int listsDone, nbLists;
   LevelStatus({
     required this.level,
     required this.locked,
@@ -33,6 +35,9 @@ class LevelStatus {
     required this.passed,
     this.bestScore,
     required this.questionCount,
+    required this.status,
+    required this.listsDone,
+    required this.nbLists,
   });
 
   factory LevelStatus.fromJson(Map<String, dynamic> j) => LevelStatus(
@@ -42,6 +47,9 @@ class LevelStatus {
     passed: j['passed'] == true,
     bestScore: (j['bestScore'] as num?)?.toDouble(),
     questionCount: (j['questionCount'] as num? ?? 0).toInt(),
+    status: j['status'] ?? 'IN_PROGRESS',
+    listsDone: (j['listsDone'] as num? ?? 0).toInt(),
+    nbLists: (j['nbLists'] as num? ?? 5).toInt(),
   );
 }
 
@@ -86,12 +94,17 @@ class QuizQuestion {
 class QuizSession {
   final String assessmentId, skill, level;
   final List<QuizQuestion> questions;
-
+  final int listNo, listsDone, nbLists, startIndex; final Map<String, int> savedAnswers;
   QuizSession({
     required this.assessmentId,
     required this.skill,
     required this.level,
     required this.questions,
+    required this.listNo,
+    required this.listsDone,
+    required this.nbLists,
+    required this.startIndex,
+    required this.savedAnswers,
   });
 
   factory QuizSession.fromJson(Map<String, dynamic> j) => QuizSession(
@@ -101,6 +114,11 @@ class QuizSession {
     questions: (j['questions'] as List? ?? const [])
         .map((e) => QuizQuestion.fromJson(e as Map<String, dynamic>))
         .toList(),
+    listNo: (j['listNo'] as num? ?? 1).toInt(),
+    listsDone: (j['listsDone'] as num? ?? 0).toInt(),
+    nbLists: (j['nbLists'] as num? ?? 5).toInt(),
+    startIndex: (j['startIndex'] as num? ?? 0).toInt(),
+    savedAnswers: ((j['savedAnswers'] as Map?) ?? {}).map((k, v) => MapEntry(k.toString(), (v as num).toInt())),
   );
 }
 
@@ -138,7 +156,7 @@ class AssessmentResult {
   final bool passed;
   final String? nextLevel;
   final List<ResultQuestion> questions;
-
+  final int listNo, listsDone, nbLists; final bool levelFinished, levelPassed; final double levelScore;
   AssessmentResult({
     required this.assessmentId,
     required this.skillId,
@@ -151,6 +169,12 @@ class AssessmentResult {
     required this.passed,
     required this.nextLevel,
     required this.questions,
+    required this.listNo,
+    required this.listsDone,
+    required this.nbLists,
+    required this.levelFinished,
+    required this.levelPassed,
+    required this.levelScore,
   });
 
   factory AssessmentResult.fromJson(Map<String, dynamic> j) => AssessmentResult(
@@ -167,6 +191,12 @@ class AssessmentResult {
     questions: (j['questions'] as List? ?? const [])
         .map((e) => ResultQuestion.fromJson(e as Map<String, dynamic>))
         .toList(),
+    listNo: (j['listNo'] as num? ?? 0).toInt(),
+    listsDone: (j['listsDone'] as num? ?? 0).toInt(),
+    nbLists: (j['nbLists'] as num? ?? 5).toInt(),
+    levelFinished: j['levelFinished'] == true,
+    levelPassed: j['levelPassed'] == true,
+    levelScore: (j['levelScore'] as num? ?? 0).toDouble(),
   );
 }
 

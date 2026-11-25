@@ -46,9 +46,14 @@ public class QuestionGenerator {
 
     public static String levelLabel(String level) {
         return switch (level) {
-            case "BEGINNER" -> "débutant (définitions et notions de base)";
-            case "INTERMEDIATE" -> "intermédiaire (mise en pratique, comparaison de notions)";
-            default -> "avancé (cas pratiques, pièges et bonnes pratiques)";
+            case "BEGINNER" -> "débutant : questions simples sur une seule notion (définition, "
+                    + "vocabulaire, rôle d'un élément). Pas de code complexe, pas de cas limite";
+            case "INTERMEDIATE" -> "intermédiaire : application sur un cas simple, comparaison de "
+                    + "deux notions, lecture d'un court exemple, choix de la bonne méthode. "
+                    + "Plus difficile qu'une simple définition";
+            default -> "avancé : cas pratique combinant plusieurs notions, erreurs fréquentes, "
+                    + "optimisation, cas limites, bonnes pratiques. Les mauvaises options doivent "
+                    + "être plausibles";
         };
     }
 
@@ -89,10 +94,14 @@ public class QuestionGenerator {
     // Génération
     // ------------------------------------------------------------------
 
-    /** Génération synchrone. Ne lève jamais d'exception : renvoie une liste vide en cas d'échec. */
+    /** Génération pour la liste la moins remplie (utilisée par le remplissage d'un niveau entier). */
     public Result generate(Skill skill, String level, int requested) {
+        return generate(skill, level, requested, targetList(skill.getId(), level));
+    }
+
+    /** Génération pour UNE liste précise. Ne lève jamais d'exception. */
+    public Result generate(Skill skill, String level, int requested, int listNo) {
         int count = Math.min(requested, MAX_PER_CALL);
-        int listNo = targetList(skill.getId(), level);
         long t0 = System.currentTimeMillis();
         List<String> passages = retrieve(skill, level);
         if (passages.isEmpty()) {
@@ -113,6 +122,40 @@ public class QuestionGenerator {
                     skill.getName(), level, e.toString());
             return new Result(List.of(), passages.size());
         }
+    }
+
+    /** Complète en arrière-plan UNE seule liste jusqu'à `target` questions. */
+    public void fillListAsync(Skill skill, String level, int listNo, int target) {
+        String key = skill.getId() + ":" + level + ":" + listNo;
+        if (!running.add(key)) {
+            log.info("RAG : la liste {} de « {} » ({}) est déjà en cours de génération.",
+                    listNo, skill.getName(), level);
+            return;
+        }
+        CompletableFuture.runAsync(() -> {
+            try {
+                int failures = 0;
+                for (int round = 0; round < MAX_ROUNDS; round++) {
+                    long size = listSizes(skill.getId(), level).getOrDefault(listNo, 0L);
+                    if (size >= target) {
+                        log.info("RAG : liste {} de « {} » ({}) complète ({} questions).",
+                                listNo, skill.getName(), level, size);
+                        return;
+                    }
+                    Result r = generate(skill, level, (int) Math.min(MAX_PER_CALL, target - size), listNo);
+                    failures = r.questions().isEmpty() ? failures + 1 : 0;
+                    if (failures >= 2) {
+                        log.warn("RAG : liste {} de « {} » ({}) arrêtée après 2 échecs.",
+                                listNo, skill.getName(), level);
+                        return;
+                    }
+                }
+            } catch (Throwable t) {
+                log.error("RAG : erreur pendant le remplissage de la liste", t);
+            } finally {
+                running.remove(key);
+            }
+        });
     }
 
     /**
@@ -228,7 +271,7 @@ public class QuestionGenerator {
         }
 
         Set<String> existing = new HashSet<>();
-        for (Question q : questions.findBySkillIdAndLevel(skill.getId(), level)) {
+        for (Question q : questions.findBySkillId(skill.getId())) {
             existing.add(q.getQuestionText().trim().toLowerCase());
         }
 

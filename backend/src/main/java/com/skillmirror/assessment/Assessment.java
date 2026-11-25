@@ -52,7 +52,12 @@ public class Assessment {
 
     @Column(name = "finished_at")
     private Instant finishedAt;
+    /** JSON {questionId: index} */
+    @Column(name = "draft_answers", columnDefinition = "text")
+    private String draftAnswers;      // JSON {questionId: index}
 
+    @Column(name = "current_index")
+    private Integer currentIndex = 0;
     @PrePersist
     void onCreate() {
         createdAt = Instant.now();

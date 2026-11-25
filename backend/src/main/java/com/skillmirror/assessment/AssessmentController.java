@@ -8,6 +8,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -23,7 +24,7 @@ public class AssessmentController {
         return service.available(auth.getName());
     }
 
-    /** Démarre un test. */
+    /** Démarre (ou reprend) la liste courante d'un niveau. */
     @PostMapping("/start")
     @ResponseStatus(HttpStatus.CREATED)
     public StartResponse start(Authentication auth, @Valid @RequestBody StartRequest req) {
@@ -47,6 +48,22 @@ public class AssessmentController {
     @GetMapping("/{id}/result")
     public ResultResponse result(Authentication auth, @PathVariable UUID id) {
         return service.result(auth.getName(), id);
+    }
+
+    /** Sauvegarde en cours de liste (le candidat peut quitter et reprendre). */
+    @PostMapping("/{id}/progress")
+    public Map<String, Boolean> saveProgress(Authentication auth, @PathVariable UUID id,
+                                             @Valid @RequestBody SaveRequest req) {
+        service.saveDraft(auth.getName(), id, req);
+        return Map.of("ok", true);
+    }
+
+    /** Refaire le niveau après un échec. */
+    @PostMapping("/restart")
+    public Map<String, Boolean> restart(Authentication auth,
+                                        @Valid @RequestBody RestartRequest req) {
+        service.restart(auth.getName(), req.skillId(), req.level());
+        return Map.of("ok", true);
     }
 
     /** Historique des tests du candidat. */

@@ -90,44 +90,56 @@ class _ResultScreenState extends State<ResultScreen> {
     final next = r.nextLevel;
     final nextLabel = next == null ? '' : (AssessmentLabels.levels[next] ?? next);
     final mark = r.passMark.toStringAsFixed(0);
+    final progress = '${r.listsDone}/${r.nbLists} listes terminées · '
+        'score cumulé ${r.levelScore.toStringAsFixed(0)} %';
 
     String message;
-    if (r.passed && next != null) {
-      message = 'Bravo ! Le niveau $nextLabel est débloqué.';
-    } else if (r.passed) {
+    if (!r.levelFinished) {
+      message = 'Liste ${r.listNo} terminée. $progress. '
+          'Terminez les ${r.nbLists} listes pour débloquer la suite.';
+    } else if (r.levelPassed && next != null) {
+      message = 'Niveau validé ! $progress. Le niveau $nextLabel est débloqué.';
+    } else if (r.levelPassed) {
       message = 'Bravo ! Vous avez validé tous les niveaux de cette compétence.';
     } else {
-      message = 'Il faut au moins $mark % pour débloquer le niveau suivant.';
+      message = 'Score global insuffisant ($progress). Il faut $mark % minimum.';
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        LinearProgressIndicator(value: r.listsDone / r.nbLists),
+        const SizedBox(height: 10),
         Text(message, textAlign: TextAlign.center),
         const SizedBox(height: 12),
-        if (r.passed && next != null)
+        if (!r.levelFinished)
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(NextTest(r.skillId, r.level)),
+            icon: const Icon(Icons.play_arrow),
+            label: Text('Liste suivante (${r.listsDone + 1}/${r.nbLists})'),
+          ),
+        if (r.levelFinished && r.levelPassed && next != null)
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(NextTest(r.skillId, next)),
             icon: const Icon(Icons.lock_open),
             label: Text('Passer au niveau $nextLabel'),
           ),
-        if (!r.passed)
+        if (r.levelFinished && !r.levelPassed)
           FilledButton.icon(
-            onPressed: () =>
-                Navigator.of(context).pop(NextTest(r.skillId, r.level)),
+            onPressed: () => Navigator.of(context)
+                .pop(NextTest(r.skillId, r.level, restart: true)),
             icon: const Icon(Icons.refresh),
-            label: const Text('Refaire le test'),
+            label: const Text('Refaire le niveau'),
           ),
         const SizedBox(height: 8),
         OutlinedButton.icon(
           onPressed: _toDashboard,
           icon: const Icon(Icons.dashboard_outlined),
-          label: const Text('Aller au tableau de bord'),
+          label: Text(r.levelFinished ? 'Aller au tableau de bord' : 'Continuer plus tard'),
         ),
       ],
     );
   }
-
   Widget _questionCard(int i, ResultQuestion q) {
     final t = Theme.of(context).textTheme;
     return Card(
