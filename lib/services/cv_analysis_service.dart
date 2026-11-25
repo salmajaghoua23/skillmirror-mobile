@@ -11,14 +11,13 @@ class CvAnalysisService {
     return Map<String, dynamic>.from(data as Map);
   }
 
-  Future<Map<String, dynamic>> run(String cvId) async =>
-      Map<String, dynamic>.from(
-        await _api.post(
-          '$_base/$cvId/analysis/run',
-          {},
-          timeout: const Duration(minutes: 12),
-        ) as Map,
-      );
+  Future<void> run(String cvId) async {
+    await _api.post(
+      '$_base/$cvId/analysis/run',
+      {},
+      timeout: const Duration(seconds: 20),
+    );
+  }
 
   Future<Map<String, dynamic>> get(String cvId) async =>
       Map<String, dynamic>.from(await _api.get('$_base/$cvId/analysis') as Map);

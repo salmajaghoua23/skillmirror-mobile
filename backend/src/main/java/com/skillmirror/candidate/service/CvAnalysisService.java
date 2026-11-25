@@ -8,8 +8,11 @@ import com.skillmirror.candidate.exception.CvProcessingException;
 import com.skillmirror.candidate.repository.CandidateCvRepository;
 import com.skillmirror.candidate.repository.CvAnalysisRepository;
 import com.skillmirror.common.Profile;
+import com.skillmirror.common.progress.AnalysisProgressService;
+import com.skillmirror.common.progress.CvConfirmedEvent;
 import com.skillmirror.scoring.ScoreService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -26,15 +29,20 @@ public class CvAnalysisService {
     private final CvExtractionService extractionService;
     private final CvAiAnalysisService aiService;
     private final ScoreService scoreService;
-
-    /** Analyse du dernier CV du candidat connecté (pour le dashboard). */
+    private final AnalysisProgressService progress;
+    private final ApplicationEventPublisher events;
+    /**
+     * Récupère l'analyse du CV actif du candidat connecté.
+     */
     public CvAnalysisResponse latest(String uid) {
         Profile p = access.candidate(uid);
-        return cvRepository.findFirstByProfileIdOrderByUploadedAtDesc(p.getId())
+
+        return cvRepository.findFirstByProfileIdAndMainTrueOrderByUploadedAtDesc(p.getId())
                 .map(cv -> get(uid, cv.getId()))
                 .orElse(null);
     }
 
+    /** Appelée en arrière-plan par CvAnalysisJob. */
     public CvAnalysisResponse analyze(String uid, UUID cvId) {
         CandidateCv cv = getOwnedCv(uid, cvId);
         CvAnalysis analysis = analysisRepository.findByCvId(cvId).orElseGet(() -> {
@@ -48,6 +56,7 @@ public class CvAnalysisService {
         analysisRepository.save(analysis);
 
         try {
+            progress.update(10, "Extraction du texte du CV…");
             byte[] bytes = storageService.download(cv.getStoragePath());
             String text = extractionService.extractText(bytes, cv.getFileName());
             analysis.setRawText(text);
@@ -71,12 +80,26 @@ public class CvAnalysisService {
     }
 
     public CvAnalysisResponse update(String uid, UUID cvId, CvAnalysisData newData) {
+
         getOwnedCv(uid, cvId);
+
         CvAnalysis a = analysisRepository.findByCvId(cvId)
-                .orElseThrow(() -> new CvProcessingException("Aucune analyse à modifier. Lance d'abord l'analyse."));
-        a.setData(newData.normalized());
+                .orElseThrow(() -> new CvProcessingException(
+                        "Aucune analyse à modifier. Lance d'abord l'analyse."
+                ));
+
+        CvAnalysisData normalizedData = newData.normalized();
+
+        // Si les données n'ont pas changé, ne rien modifier
+        if (normalizedData.equals(a.getData())) {
+            return toResponse(a);
+        }
+
+        // Si les données ont changé, enregistrer les modifications
+        a.setData(normalizedData);
         a.setStatus("EXTRACTED");
         a.setConfirmedAt(null);
+
         return toResponse(analysisRepository.save(a));
     }
 
@@ -89,6 +112,10 @@ public class CvAnalysisService {
         if (a.getData() == null || "FAILED".equals(a.getStatus())) {
             throw new CvProcessingException("Impossible de confirmer : l'extraction a échoué.");
         }
+        // Éviter une deuxième confirmation sans modification
+        if ("CONFIRMED".equals(a.getStatus())) {
+            return toResponse(a);
+        }
 
         a.setStatus("CONFIRMED");
         a.setConfirmedAt(Instant.now());
@@ -96,6 +123,9 @@ public class CvAnalysisService {
         CvAnalysis saved = analysisRepository.save(a);
 
         scoreService.recompute(cv.getProfileId(), "INITIAL");
+
+        // Relance en arrière-plan l'analyse du métier visé avec le CV confirmé
+        events.publishEvent(new CvConfirmedEvent(cv.getProfileId()));
 
         return toResponse(saved);
     }

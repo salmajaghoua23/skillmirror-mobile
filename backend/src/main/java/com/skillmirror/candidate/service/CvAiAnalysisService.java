@@ -1,15 +1,18 @@
 package com.skillmirror.candidate.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.skillmirror.candidate.dto.CvAnalysisData;
 import com.skillmirror.candidate.dto.CvAnalysisData.*;
+import com.skillmirror.common.progress.AnalysisProgressService;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -20,9 +23,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
+@RequiredArgsConstructor
 public class CvAiAnalysisService {
 
     private static final Logger log = LoggerFactory.getLogger(CvAiAnalysisService.class);
+
+    // Suivi de progression (sans effet si l'analyse n'est pas lancée par CvAnalysisJob)
+    private final AnalysisProgressService progress;
 
     @Value("${ollama.enabled}") private boolean enabled;
     @Value("${ollama.url}") private String ollamaUrl;
@@ -36,12 +43,14 @@ public class CvAiAnalysisService {
 
     public CvAnalysisData analyze(String cvText) {
         if (!enabled) {
+            progress.update(90, "Analyse simplifiée (IA désactivée)…");
             return analyzeWithRules(cvText);
         }
         try {
             return analyzeWithOllama(cvText).normalized();
         } catch (Exception e) {
             log.warn("Ollama indisponible ou réponse invalide ({}), utilisation du mode de secours.", e.getMessage());
+            progress.update(90, "IA indisponible, analyse simplifiée…");
             return analyzeWithRules(cvText);
         }
     }
@@ -54,15 +63,18 @@ public class CvAiAnalysisService {
         - Ignore les textes entre crochets [ ... ] : ce sont des champs non remplis.
         - Laisse "" quand une information est absente.
         - Écris les années au format "2024".
+        - Ne répète jamais le même élément : chaque élément de liste apparaît une seule fois.
         """;
 
     private static final String TASK_SKILLS = """
         TÂCHE : extraire les compétences et un résumé.
         - technicalSkills : compétences métier et techniques (langages, logiciels, outils, méthodes, domaines
           comme comptabilité, fiscalité, SQL, Docker...). Un élément court par compétence (1 à 4 mots).
+          Chaque compétence apparaît UNE SEULE FOIS : jamais de répétition ni de doublon.
+          Maximum 30 compétences techniques.
           Inclus celles listées dans le CV et celles clairement utilisées dans les stages et projets.
           Pas de phrases, pas de langues parlées, pas de qualités personnelles.
-        - softSkills : qualités personnelles citées dans le CV (ex : rigueur, esprit d'équipe).
+        - softSkills : qualités personnelles citées dans le CV (ex : rigueur, esprit d'équipe). Maximum 8.
         - summary : 2 phrases en français décrivant le profil du candidat.
         """;
 
@@ -87,29 +99,29 @@ public class CvAiAnalysisService {
 
     private static final String SCHEMA_SKILLS = """
         {"type":"object","properties":{
-          "technicalSkills":{"type":"array","items":{"type":"string"}},
-          "softSkills":{"type":"array","items":{"type":"string"}},
+          "technicalSkills":{"type":"array","maxItems":30,"items":{"type":"string"}},
+          "softSkills":{"type":"array","maxItems":10,"items":{"type":"string"}},
           "summary":{"type":"string"}},
          "required":["technicalSkills","softSkills","summary"]}
         """;
 
     private static final String SCHEMA_BACKGROUND = """
         {"type":"object","properties":{
-          "education":{"type":"array","items":{"type":"object","properties":{
+          "education":{"type":"array","maxItems":10,"items":{"type":"object","properties":{
             "degree":{"type":"string"},"institution":{"type":"string"},"field":{"type":"string"},
             "startYear":{"type":"string"},"endYear":{"type":"string"}},
             "required":["degree","institution"]}},
-          "certifications":{"type":"array","items":{"type":"object","properties":{
+          "certifications":{"type":"array","maxItems":10,"items":{"type":"object","properties":{
             "name":{"type":"string"},"issuer":{"type":"string"},"year":{"type":"string"}},
             "required":["name"]}},
-          "languages":{"type":"array","items":{"type":"object","properties":{
+          "languages":{"type":"array","maxItems":8,"items":{"type":"object","properties":{
             "name":{"type":"string"},"level":{"type":"string"}},"required":["name"]}}},
          "required":["education","certifications","languages"]}
         """;
 
     private static final String SCHEMA_EXPERIENCES = """
         {"type":"object","properties":{
-          "experiences":{"type":"array","items":{"type":"object","properties":{
+          "experiences":{"type":"array","maxItems":15,"items":{"type":"object","properties":{
             "title":{"type":"string"},"company":{"type":"string"},"startDate":{"type":"string"},
             "endDate":{"type":"string"},"description":{"type":"string"}},
             "required":["title","company"]}}},
@@ -120,37 +132,63 @@ public class CvAiAnalysisService {
         String text = cvText.length() > 15000 ? cvText.substring(0, 15000) : cvText;
 
         ObjectNode merged = mapper.createObjectNode();
-        merged.setAll(ask("compétences", text, TASK_SKILLS, SCHEMA_SKILLS));
-        merged.setAll(ask("formations", text, TASK_BACKGROUND, SCHEMA_BACKGROUND));
-        merged.setAll(ask("expériences", text, TASK_EXPERIENCES, SCHEMA_EXPERIENCES));
+
+        progress.update(20, "Analyse des compétences…");
+        merged.setAll(ask("compétences", text, TASK_SKILLS, SCHEMA_SKILLS, 700));
+
+        progress.update(50, "Analyse des formations…");
+        merged.setAll(ask("formations", text, TASK_BACKGROUND, SCHEMA_BACKGROUND, 1000));
+
+        progress.update(75, "Analyse des expériences…");
+        merged.setAll(ask("expériences", text, TASK_EXPERIENCES, SCHEMA_EXPERIENCES, 1200));
+
+        progress.update(95, "Enregistrement…");
         return mapper.treeToValue(merged, CvAnalysisData.class);
     }
 
-    /** Un appel Ollama ciblé ; un seul nouvel essai si le JSON renvoyé est invalide. */
-    private ObjectNode ask(String name, String text, String task, String schema) throws Exception {
+    /**
+     * Un appel Ollama ciblé. Un seul nouvel essai, avec d'autres paramètres :
+     * relancer exactement la même requête redonnerait la même réponse défaillante.
+     */
+    private ObjectNode ask(String name, String text, String task, String schema, int maxTokens) throws Exception {
         String prompt = "Voici le CV d'un candidat (tous secteurs possibles) :\n\n<cv>\n" + text
                 + "\n</cv>\n\n" + RULES + "\n" + task;
 
-        Map<String, Object> body = Map.of(
-                "model", model, "prompt", prompt, "stream", false,
-                "format", mapper.readTree(schema),
-                "keep_alive", "10m",
-                "options", Map.of("temperature", 0, "num_ctx", 8192, "num_predict", 1500));
-
-        HttpRequest req = HttpRequest.newBuilder(URI.create(ollamaUrl + "/api/generate"))
-                .timeout(Duration.ofSeconds(timeoutSeconds))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
-                .build();
-
         for (int attempt = 1; attempt <= 2; attempt++) {
+
+            // essai 1 : quasi déterministe ; essai 2 : plus de variété pour casser une boucle de répétition
+            Map<String, Object> options = new LinkedHashMap<>();
+            options.put("temperature", attempt == 1 ? 0.1 : 0.4);
+            options.put("repeat_penalty", attempt == 1 ? 1.2 : 1.35);
+            options.put("repeat_last_n", 256);
+            options.put("top_k", 40);
+            options.put("top_p", 0.9);
+            options.put("seed", 42 + attempt);
+            options.put("num_ctx", 8192);
+            options.put("num_predict", maxTokens);
+
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("model", model);
+            body.put("prompt", prompt);
+            body.put("stream", false);
+            body.put("format", mapper.readTree(schema));
+            body.put("keep_alive", "10m");
+            body.put("options", options);
+
+            HttpRequest req = HttpRequest.newBuilder(URI.create(ollamaUrl + "/api/generate"))
+                    .timeout(Duration.ofSeconds(timeoutSeconds))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
+                    .build();
+
             HttpResponse<String> res = client.send(req, HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() != 200) {
                 throw new IllegalStateException("HTTP " + res.statusCode() + " (modèle '" + model + "' téléchargé ?)");
             }
             try {
                 String json = mapper.readTree(res.body()).get("response").asText();
-                log.info("Ollama [{}] -> {}", name, json.length() > 600 ? json.substring(0, 600) + "..." : json);
+                log.info("Ollama [{}] essai {} -> {}", name, attempt,
+                        json.length() > 600 ? json.substring(0, 600) + "..." : json);
                 JsonNode node = mapper.readTree(json);
                 if (node.isObject()) return (ObjectNode) node;
             } catch (JsonProcessingException e) {

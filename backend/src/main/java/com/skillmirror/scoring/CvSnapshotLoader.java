@@ -59,12 +59,18 @@ public class CvSnapshotLoader {
         return new CvSnapshot(skills, years, expTexts, d.education().size(), d.languages().size(), certs);
     }
 
-    private double durationYears(String start, String end) {
-        Integer s = firstYear(start);
-        if (s == null) return 0;
-        Integer e = (end != null && NOW.matcher(end).find()) ? Year.now().getValue() : firstYear(end);
-        if (e == null) e = s + 1;
-        return Math.max(e - s, 0.5);
+    /** Durée en années entre deux dates texte ; 0 si une année est introuvable. */
+    private int durationYears(String start, String end) {
+        Integer from = firstYear(start);
+        Integer to = firstYear(end);
+
+        if (from == null) {
+            return 0;                       // pas d'année de début : durée inconnue
+        }
+        if (to == null) {
+            to = java.time.Year.now().getValue();   // « Présent », « En cours », date vide
+        }
+        return Math.max(0, to - from);
     }
 
     private Integer firstYear(String text) {
