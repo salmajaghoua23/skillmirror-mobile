@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import '../../models/assessment.dart';
 import '../../services/assessment_service.dart';
 
-/// Résultat d'un test : score, correction question par question et explications.
+/// Résultat d'un test : score, suite possible (niveau suivant / refaire / tableau de bord)
+/// et correction question par question.
 class ResultScreen extends StatefulWidget {
   final String assessmentId;
   const ResultScreen({super.key, required this.assessmentId});
@@ -15,6 +16,9 @@ class ResultScreen extends StatefulWidget {
 class _ResultScreenState extends State<ResultScreen> {
   late final Future<AssessmentResult> _future =
   AssessmentService().result(widget.assessmentId);
+
+  void _toDashboard() =>
+      Navigator.of(context).popUntil((route) => route.isFirst);
 
   @override
   Widget build(BuildContext context) {
@@ -35,7 +39,9 @@ class _ResultScreenState extends State<ResultScreen> {
 
   Widget _body(AssessmentResult r) {
     final t = Theme.of(context).textTheme;
-    final color = r.passed ? Colors.green : (r.score >= 50 ? Colors.orange : Colors.red);
+    final color = r.passed
+        ? Colors.green
+        : (r.score >= 40 ? Colors.orange : Colors.red);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -71,9 +77,53 @@ class _ResultScreenState extends State<ResultScreen> {
           ),
         ),
         const SizedBox(height: 16),
+        _actions(r),
+        const SizedBox(height: 20),
         Text('Correction', style: t.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
         for (var i = 0; i < r.questions.length; i++) _questionCard(i, r.questions[i]),
+      ],
+    );
+  }
+
+  Widget _actions(AssessmentResult r) {
+    final next = r.nextLevel;
+    final nextLabel = next == null ? '' : (AssessmentLabels.levels[next] ?? next);
+    final mark = r.passMark.toStringAsFixed(0);
+
+    String message;
+    if (r.passed && next != null) {
+      message = 'Bravo ! Le niveau $nextLabel est débloqué.';
+    } else if (r.passed) {
+      message = 'Bravo ! Vous avez validé tous les niveaux de cette compétence.';
+    } else {
+      message = 'Il faut au moins $mark % pour débloquer le niveau suivant.';
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(message, textAlign: TextAlign.center),
+        const SizedBox(height: 12),
+        if (r.passed && next != null)
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(NextTest(r.skillId, next)),
+            icon: const Icon(Icons.lock_open),
+            label: Text('Passer au niveau $nextLabel'),
+          ),
+        if (!r.passed)
+          FilledButton.icon(
+            onPressed: () =>
+                Navigator.of(context).pop(NextTest(r.skillId, r.level)),
+            icon: const Icon(Icons.refresh),
+            label: const Text('Refaire le test'),
+          ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _toDashboard,
+          icon: const Icon(Icons.dashboard_outlined),
+          label: const Text('Aller au tableau de bord'),
+        ),
       ],
     );
   }

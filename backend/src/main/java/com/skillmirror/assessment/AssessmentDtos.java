@@ -36,7 +36,12 @@ public final class AssessmentDtos {
     public record StartResponse(UUID assessmentId, String skill, String level,
                                 List<QuestionOut> questions) {}
 
-    public record AvailableSkill(UUID skillId, String name, String category, long questionCount) {}
+    /** État d'un niveau pour un candidat : verrouillé, validé, meilleur score... */
+    public record LevelStatus(String level, boolean locked, boolean hasQuestions,
+                              Double bestScore, boolean passed, int questionCount) {}
+
+    public record AvailableSkill(UUID skillId, String name, String category,
+                                 boolean recommended, List<LevelStatus> levels) {}
 
     public record GenerateResponse(int generated, int passagesUsed, List<String> questions) {}
 
@@ -45,9 +50,11 @@ public final class AssessmentDtos {
                                  Integer selectedIndex, int correctIndex,
                                  boolean correct, String explanation) {}
 
-    public record ResultResponse(UUID assessmentId, String skill, String level,
+    /** nextLevel = niveau suivant (null si c'est le dernier). passMark = seuil de réussite en %. */
+    public record ResultResponse(UUID assessmentId, UUID skillId, String skill, String level,
                                  double score, int correctCount, int total, boolean passed,
-                                 String status, Instant finishedAt, List<ResultQuestion> questions) {}
+                                 double passMark, String nextLevel, String status,
+                                 Instant finishedAt, List<ResultQuestion> questions) {}
 
     public record HistoryItem(UUID id, UUID skillId, String skill, String level, String status,
                               Double score, Integer total, Instant createdAt, Instant finishedAt) {}

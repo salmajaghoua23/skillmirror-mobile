@@ -52,6 +52,10 @@ public class Question {
     /** BANK (banque de départ) | AI (générée avec RAG) */
     private String source = "BANK";
 
+    /** Numéro de la liste (1 à 5) à laquelle appartient la question. */
+    @Column(name = "list_no")
+    private Integer listNo = 1;
+
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;
 

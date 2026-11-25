@@ -17,6 +17,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *   1) RETRIEVE : on retrouve les passages de cours les plus proches de la compétence
  *   2) AUGMENT  : on les insère dans le prompt
  *   3) GENERATE : Ollama rédige des QCM en s'appuyant UNIQUEMENT sur ces passages
+ *
+ * Chaque niveau comporte 5 listes de questions ; une liste doit contenir au moins 10 questions.
  */
 @Service
 @RequiredArgsConstructor
@@ -24,8 +26,14 @@ public class QuestionGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(QuestionGenerator.class);
 
+    /** Nombre de listes par niveau, et taille minimale d'une liste. */
+    public static final int LISTS_PER_LEVEL = 5;
+    public static final int MIN_LIST_SIZE = 10;
+
     /** Un petit modèle (1b / 3b) respecte mieux les consignes avec peu de questions par appel. */
     private static final int MAX_PER_CALL = 3;
+    /** Nombre maximum d'appels pour remplir un niveau (évite une boucle sans fin). */
+    private static final int MAX_ROUNDS = 25;
 
     public record Result(List<Question> questions, int passagesUsed) {}
 
@@ -44,22 +52,61 @@ public class QuestionGenerator {
         };
     }
 
+    // ------------------------------------------------------------------
+    // Listes de questions
+    // ------------------------------------------------------------------
+
+    /** Nombre de questions dans chacune des 5 listes d'une compétence et d'un niveau. */
+    public Map<Integer, Long> listSizes(UUID skillId, String level) {
+        Map<Integer, Long> sizes = new TreeMap<>();
+        for (int i = 1; i <= LISTS_PER_LEVEL; i++) sizes.put(i, 0L);
+        for (Question q : questions.findBySkillIdAndLevel(skillId, level)) {
+            int n = q.getListNo() == null ? 1 : q.getListNo();
+            if (n >= 1 && n <= LISTS_PER_LEVEL) sizes.merge(n, 1L, Long::sum);
+        }
+        return sizes;
+    }
+
+    /** Vrai si les 5 listes contiennent chacune au moins 10 questions. */
+    public boolean isComplete(UUID skillId, String level) {
+        return listSizes(skillId, level).values().stream().allMatch(c -> c >= MIN_LIST_SIZE);
+    }
+
+    /** La liste la moins remplie : c'est elle qu'on complète en premier. */
+    private int targetList(UUID skillId, String level) {
+        int best = 1;
+        long bestCount = Long.MAX_VALUE;
+        for (Map.Entry<Integer, Long> e : listSizes(skillId, level).entrySet()) {
+            if (e.getValue() < bestCount) {
+                best = e.getKey();
+                bestCount = e.getValue();
+            }
+        }
+        return best;
+    }
+
+    // ------------------------------------------------------------------
+    // Génération
+    // ------------------------------------------------------------------
+
     /** Génération synchrone. Ne lève jamais d'exception : renvoie une liste vide en cas d'échec. */
     public Result generate(Skill skill, String level, int requested) {
         int count = Math.min(requested, MAX_PER_CALL);
+        int listNo = targetList(skill.getId(), level);
         long t0 = System.currentTimeMillis();
         List<String> passages = retrieve(skill, level);
         if (passages.isEmpty()) {
             log.warn("RAG : aucun passage de cours pour « {} » : génération IA impossible.", skill.getName());
             return new Result(List.of(), 0);
         }
-        log.info("RAG : génération lancée pour « {} » ({}) : {} passage(s) trouvé(s), modèle {}",
-                skill.getName(), level, passages.size(), ollama.modelName());
+        log.info("RAG : génération lancée pour « {} » ({}, liste {}) : {} passage(s), modèle {}",
+                skill.getName(), level, listNo, passages.size(), ollama.modelName());
         try {
-            String json = ollama.generateJson(buildPrompt(skill, level, count, passages));
-            List<Question> saved = parseAndSave(json, skill, level, count);
-            log.info("RAG : {} question(s) générée(s) pour « {} » ({}) en {} s",
-                    saved.size(), skill.getName(), level, (System.currentTimeMillis() - t0) / 1000);
+            List<String> avoid = recentQuestionTexts(skill.getId(), level, 12);
+            String json = ollama.generateJson(buildPrompt(skill, level, count, passages, avoid));
+            List<Question> saved = parseAndSave(json, skill, level, count, listNo);
+            log.info("RAG : {} question(s) générée(s) pour « {} » ({}, liste {}) en {} s",
+                    saved.size(), skill.getName(), level, listNo, (System.currentTimeMillis() - t0) / 1000);
             return new Result(saved, passages.size());
         } catch (Exception e) {
             log.warn("RAG : génération IA impossible pour « {} » ({}) : {}",
@@ -68,23 +115,54 @@ public class QuestionGenerator {
         }
     }
 
-    /** Génération en arrière-plan, sans doublon pour une même compétence et un même niveau. */
-    public void generateAsync(Skill skill, String level, int count) {
+    /**
+     * Remplit en arrière-plan les 5 listes d'un niveau jusqu'à 10 questions chacune.
+     * Un seul remplissage à la fois par compétence et niveau.
+     */
+    public void fillAsync(Skill skill, String level) {
         String key = skill.getId() + ":" + level;
         if (!running.add(key)) {
-            log.info("RAG : une génération est déjà en cours pour « {} » ({}).", skill.getName(), level);
+            log.info("RAG : un remplissage est déjà en cours pour « {} » ({}).", skill.getName(), level);
             return;
         }
-        log.info("RAG : génération en arrière-plan demandée pour « {} » ({}).", skill.getName(), level);
+        log.info("RAG : remplissage des listes lancé pour « {} » ({}).", skill.getName(), level);
         CompletableFuture.runAsync(() -> {
             try {
-                generate(skill, level, count);
+                fillLevel(skill, level);
             } catch (Throwable t) {
-                log.error("RAG : erreur inattendue pendant la génération", t);
+                log.error("RAG : erreur inattendue pendant le remplissage", t);
             } finally {
                 running.remove(key);
             }
         });
+    }
+
+    /** Remplissage synchrone (utilisé par le pré-remplissage au démarrage). */
+    public void fillNow(Skill skill, String level) {
+        String key = skill.getId() + ":" + level;
+        if (!running.add(key)) return;
+        try {
+            fillLevel(skill, level);
+        } finally {
+            running.remove(key);
+        }
+    }
+
+    private void fillLevel(Skill skill, String level) {
+        int failures = 0;
+        for (int round = 0; round < MAX_ROUNDS; round++) {
+            if (isComplete(skill.getId(), level)) {
+                log.info("RAG : les 5 listes de « {} » ({}) sont complètes.", skill.getName(), level);
+                return;
+            }
+            Result r = generate(skill, level, MAX_PER_CALL);
+            failures = r.questions().isEmpty() ? failures + 1 : 0;
+            if (failures >= 2) {
+                log.warn("RAG : remplissage arrêté pour « {} » ({}) après 2 échecs consécutifs.",
+                        skill.getName(), level);
+                return;
+            }
+        }
     }
 
     // ---------- 1) RETRIEVE ----------
@@ -101,10 +179,16 @@ public class QuestionGenerator {
     }
 
     // ---------- 2) AUGMENT ----------
-    private String buildPrompt(Skill skill, String level, int count, List<String> passages) {
+    private String buildPrompt(Skill skill, String level, int count, List<String> passages,
+                               List<String> avoid) {
         StringBuilder ctx = new StringBuilder();
         for (int i = 0; i < passages.size(); i++) {
             ctx.append("[").append(i + 1).append("] ").append(passages.get(i)).append("\n");
+        }
+        StringBuilder known = new StringBuilder();
+        if (!avoid.isEmpty()) {
+            known.append("\nQuestions déjà existantes (ne les répète pas, pose-en d'autres) :\n");
+            for (String a : avoid) known.append("- ").append(a).append("\n");
         }
         return """
                 Tu es un examinateur technique. À partir UNIQUEMENT des extraits de cours ci-dessous,
@@ -118,14 +202,25 @@ public class QuestionGenerator {
                 - ne pose aucune question dont la réponse n'est pas dans les extraits ;
                 - réponds UNIQUEMENT avec ce JSON, sans texte autour :
                 {"questions":[{"question":"","options":["","","",""],"correctIndex":0,"explanation":""}]}
-
+                %s
                 EXTRAITS DE COURS :
                 %s
-                """.formatted(count, skill.getName(), levelLabel(level), ctx);
+                """.formatted(count, skill.getName(), levelLabel(level), known, ctx);
+    }
+
+    private List<String> recentQuestionTexts(UUID skillId, String level, int max) {
+        List<Question> all = questions.findBySkillIdAndLevel(skillId, level);
+        List<String> out = new ArrayList<>();
+        for (int i = Math.max(0, all.size() - max); i < all.size(); i++) {
+            String t = all.get(i).getQuestionText().trim();
+            out.add(t.length() > 120 ? t.substring(0, 120) + "…" : t);
+        }
+        return out;
     }
 
     // ---------- 3) GENERATE : validation puis enregistrement ----------
-    private List<Question> parseAndSave(String json, Skill skill, String level, int count) throws Exception {
+    private List<Question> parseAndSave(String json, Skill skill, String level, int count, int listNo)
+            throws Exception {
         JsonNode arr = extractArray(mapper.readTree(json));
         if (arr == null) {
             log.warn("RAG : réponse du modèle sans liste de questions : {}", excerpt(json));
@@ -159,6 +254,7 @@ public class QuestionGenerator {
             Question q = new Question();
             q.setSkillId(skill.getId());
             q.setLevel(level);
+            q.setListNo(listNo);
             q.setQuestionText(text);
             q.applyOptions(options);
             q.setCorrectIndex(idx);

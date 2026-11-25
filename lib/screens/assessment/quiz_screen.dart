@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../models/assessment.dart';
 import '../../services/assessment_service.dart';
-import 'result_screen.dart';
 
 /// Passage du test : une question à la fois.
 class QuizScreen extends StatefulWidget {
@@ -54,11 +53,7 @@ class _QuizScreenState extends State<QuizScreen> {
         _questions,
       );
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => ResultScreen(assessmentId: r.assessmentId),
-        ),
-      );
+      Navigator.of(context).pop(r.assessmentId);
     } catch (e) {
       if (!mounted) return;
       setState(() => _submitting = false);

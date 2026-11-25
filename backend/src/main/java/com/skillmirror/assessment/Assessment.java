@@ -31,6 +31,9 @@ public class Assessment {
     private UUID skillId;
 
     private String level;
+    /** Liste de questions utilisée (1 à 5), vide si échantillon mélangé. */
+    @Column(name = "list_no")
+    private Integer listNo;
 
     /** IN_PROGRESS | COMPLETED */
     private String status = "IN_PROGRESS";
